@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>dev.carlo.Fittr</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>fittr</string>
+			</array>
+		</dict>
+	</array>
+	<key>NSAppleMusicUsageDescription</key>
+	<string>Fittr can look up playlists and MP3s already on this iPhone so you can assign a local track to each exercise. Music library access is optional.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Fittr can add your scheduled workouts to Apple Calendar so they appear alongside your other events. Calendar access is optional.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Fittr can keep workout events in sync if you turn on two-way Calendar sync in Settings. This is optional and off by default.</string>
+	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
+	<string>Fittr can create and update its own workout events on your calendar. It does not need to read your other events.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Fittr can read body weight, heart rate, steps, and recent workouts from Apple Health to show trends. Nothing is uploaded. Health access is optional.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Fittr can save completed workouts to Apple Health so they appear in the Fitness and Health apps. Nothing is uploaded. Health write access is optional.</string>
+	<key>NSUserNotificationsUsageDescription</key>
+	<string>Fittr can remind you about upcoming workouts and when rest time is over. Notifications are optional and only requested when you turn reminders on.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
+</dict>
+</plist>
