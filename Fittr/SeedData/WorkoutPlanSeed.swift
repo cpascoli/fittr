@@ -117,7 +117,7 @@ enum WorkoutPlanSeed {
                 item(order: 3, exercise: exercises[SeedID.oneArmRow], sets: 2, min: 8, max: 12, rest: 75),
                 item(order: 4, exercise: exercises[SeedID.shoulderPress], sets: 2, min: 8, max: 12, rest: 90),
                 item(order: 5, exercise: exercises[SeedID.latPulldown], sets: 2, min: 8, max: 12, rest: 90, optional: true),
-                item(order: 6, exercise: exercises[SeedID.plank], sets: 2, rest: 60, duration: 25),
+                item(order: 6, exercise: exercises[SeedID.plank], sets: 2, rest: 60, duration: ExerciseLibrarySeed.plankTargetSeconds),
             ]
         )
     }

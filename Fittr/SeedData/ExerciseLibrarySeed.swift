@@ -1,6 +1,17 @@
 import Foundation
 
 enum ExerciseLibrarySeed {
+    static let startingWeightKg: [UUID: Double] = [
+        SeedID.gobletSquat: 12,
+        SeedID.romanianDeadlift: 10,
+        SeedID.chestPress: 8,
+        SeedID.oneArmRow: 10,
+        SeedID.shoulderPress: 6,
+        SeedID.latPulldown: 25,
+    ]
+
+    static let plankTargetSeconds = 30
+
     static func definitions() -> [ExerciseDefinition] {
         [
             ExerciseDefinition(
@@ -26,7 +37,8 @@ enum ExerciseLibrarySeed {
                     "Cutting depth to chase heavier load.",
                 ],
                 localVideoName: "goblet-squat",
-                defaultRestSeconds: 90
+                defaultRestSeconds: 90,
+                defaultWeightKg: startingWeightKg[SeedID.gobletSquat]
             ),
             ExerciseDefinition(
                 id: SeedID.romanianDeadlift,
@@ -51,7 +63,8 @@ enum ExerciseLibrarySeed {
                     "Letting the dumbbells drift away from the legs.",
                 ],
                 localVideoName: "dumbbell-romanian-deadlift",
-                defaultRestSeconds: 90
+                defaultRestSeconds: 90,
+                defaultWeightKg: startingWeightKg[SeedID.romanianDeadlift]
             ),
             ExerciseDefinition(
                 id: SeedID.chestPress,
@@ -76,7 +89,8 @@ enum ExerciseLibrarySeed {
                     "Pressing toward the face instead of mid-chest.",
                 ],
                 localVideoName: "dumbbell-chest-press",
-                defaultRestSeconds: 90
+                defaultRestSeconds: 90,
+                defaultWeightKg: startingWeightKg[SeedID.chestPress]
             ),
             ExerciseDefinition(
                 id: SeedID.oneArmRow,
@@ -102,7 +116,8 @@ enum ExerciseLibrarySeed {
                     "Rounding the upper back.",
                 ],
                 localVideoName: "one-arm-dumbbell-row",
-                defaultRestSeconds: 75
+                defaultRestSeconds: 75,
+                defaultWeightKg: startingWeightKg[SeedID.oneArmRow]
             ),
             ExerciseDefinition(
                 id: SeedID.shoulderPress,
@@ -126,7 +141,8 @@ enum ExerciseLibrarySeed {
                     "Pressing the bells far forward of the head.",
                 ],
                 localVideoName: "dumbbell-shoulder-press",
-                defaultRestSeconds: 90
+                defaultRestSeconds: 90,
+                defaultWeightKg: startingWeightKg[SeedID.shoulderPress]
             ),
             ExerciseDefinition(
                 id: SeedID.latPulldown,
@@ -151,7 +167,8 @@ enum ExerciseLibrarySeed {
                 ],
                 localVideoName: "lat-pulldown",
                 defaultRestSeconds: 90,
-                notes: "Skip if the gym does not have a pulldown machine."
+                defaultWeightKg: startingWeightKg[SeedID.latPulldown],
+                notes: "Skip if the gym does not have a pulldown machine. Machine stacks vary; 25 kg is an approximate start."
             ),
             ExerciseDefinition(
                 id: SeedID.plank,
@@ -167,7 +184,7 @@ enum ExerciseLibrarySeed {
                 coachingCues: [
                     "Squeeze glutes lightly and brace as if expecting a tap on the stomach.",
                     "Keep the neck in line with the spine.",
-                    "Target 20–30 seconds to start.",
+                    "Start at 30 seconds.",
                 ],
                 commonMistakes: [
                     "Hips sagging toward the floor.",
@@ -178,7 +195,7 @@ enum ExerciseLibrarySeed {
                 defaultMinReps: 0,
                 defaultMaxReps: 0,
                 defaultRestSeconds: 60,
-                defaultDurationSeconds: 25,
+                defaultDurationSeconds: plankTargetSeconds,
                 trackingMode: .duration
             ),
             ExerciseDefinition(

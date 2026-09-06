@@ -24,6 +24,7 @@ final class ExerciseDefinition {
     var defaultSetCount: Int
     var defaultRestSeconds: Int
     var defaultDurationSeconds: Int
+    var defaultWeightKg: Double?
     var trackingModeRaw: String
     var notes: String
     var isEnabled: Bool
@@ -90,6 +91,7 @@ final class ExerciseDefinition {
         defaultSetCount: Int = 2,
         defaultRestSeconds: Int = 90,
         defaultDurationSeconds: Int = 0,
+        defaultWeightKg: Double? = nil,
         trackingMode: TrackingMode = .repsWeight,
         notes: String = "",
         isEnabled: Bool = true
@@ -115,6 +117,7 @@ final class ExerciseDefinition {
         self.defaultSetCount = defaultSetCount
         self.defaultRestSeconds = defaultRestSeconds
         self.defaultDurationSeconds = defaultDurationSeconds
+        self.defaultWeightKg = defaultWeightKg
         self.trackingModeRaw = trackingMode.rawValue
         self.notes = notes
         self.isEnabled = isEnabled

@@ -16,7 +16,7 @@ final class ActiveWorkoutController {
     var draftReps: Int = 10
     var draftLeftReps: Int = 10
     var draftRightReps: Int = 10
-    var draftDurationSeconds: Int = 25
+    var draftDurationSeconds: Int = ExerciseLibrarySeed.plankTargetSeconds
     var draftRIR: Double?
     var draftRPE: Double?
     var draftNote: String = ""
@@ -32,7 +32,13 @@ final class ActiveWorkoutController {
     var weightIncrementKg: Double = 2
     var autoPlayExerciseTrack = false
     var restartExerciseTrack = true
+    var isMusicPlaying = false
     var tick: Date = .now
+    private var restActive = false
+    private var musicPausedForRest = false
+    private var musicStoppedByUser = false
+    private var allowMusicDuringRest = false
+    private var playbackGeneration = 0
 
     init(
         session: WorkoutSession,
@@ -56,6 +62,12 @@ final class ActiveWorkoutController {
         restoreCurrentExercise()
         prefillFromHistory()
         activateCurrentIfNeeded()
+        restActive = openRest != nil
+        if restActive {
+            pauseMusicForRest()
+        } else {
+            isMusicPlaying = music.isPlaying
+        }
     }
 
     var snapshot: TemplateSnapshot? { session.snapshot }
@@ -69,10 +81,53 @@ final class ActiveWorkoutController {
     var prescription: TemplateExerciseSnapshot? { currentExercise?.prescription }
 
     var openRest: RestInterval? {
-        currentExercise?.rests.first { $0.isOpen }
+        currentExercise?.rests
+            .filter(\.isOpen)
+            .sorted { $0.startedAt > $1.startedAt }
+            .first
     }
 
-    var isResting: Bool { openRest != nil }
+    var isResting: Bool { restActive || openRest != nil }
+
+    var isRestingBeforeNextExercise: Bool {
+        guard isResting else { return false }
+        return openRest?.shouldAdvanceToNextExercise == true || hasCompletedPrescribedSets
+    }
+
+    var hasCompletedPrescribedSets: Bool {
+        completedSetCount >= targetSets
+    }
+
+    var completedSetCount: Int {
+        let fromSets = currentExercise?.completedSets.map(\.setNumber).max() ?? 0
+        return fromSets
+    }
+
+    var nextExerciseName: String? {
+        nextExerciseSession?.exerciseName
+    }
+
+    var nextExerciseId: UUID? {
+        nextExerciseSession?.exerciseId
+    }
+
+    var techniqueExerciseId: UUID? {
+        if isRestingBeforeNextExercise {
+            return nextExerciseId
+        }
+        return currentExercise?.exerciseId
+    }
+
+    var hasNextExercise: Bool {
+        nextExerciseSession != nil
+    }
+
+    private var nextExerciseSession: ExerciseSession? {
+        let items = session.orderedExercises
+        let next = currentExerciseIndex + 1
+        guard items.indices.contains(next) else { return nil }
+        return items[next]
+    }
 
     var elapsedWorkout: TimeInterval {
         session.elapsed(now: tick)
@@ -124,6 +179,10 @@ final class ActiveWorkoutController {
 
     func pulse() {
         tick = .now
+        if isResting && !allowMusicDuringRest && music.isPlaying {
+            music.pause()
+        }
+        isMusicPlaying = music.isPlaying
         if restIsReady && !restDidFireHaptic {
             restDidFireHaptic = true
             haptics.restComplete()
@@ -155,28 +214,25 @@ final class ActiveWorkoutController {
         persist()
         PlannedLoadService.consume(exerciseId: exercise.exerciseId, in: modelContext)
         haptics.setCompleted()
-
-        let completedCount = exercise.completedSets.count
-        if completedCount < targetSets {
-            startRest(after: set, exercise: exercise)
-        } else {
-            finishExercise(advance: true)
-        }
+        beginRestAfterCompletedSet(set, on: exercise)
     }
 
-    func startRest(after set: ExerciseSet, exercise: ExerciseSession) {
+    func startRest(after set: ExerciseSet?, exercise: ExerciseSession, advancesToNextExercise: Bool) {
         finishOpenRest()
         restDidFireHaptic = false
-        let target = prescription?.targetRestSeconds ?? 90
+        restActive = true
+        let target = max(prescription?.targetRestSeconds ?? 90, 1)
         let rest = RestInterval(
             targetDurationSeconds: target,
             startedAt: .now,
-            afterSetId: set.id,
+            afterSetId: set?.id,
+            advancesToNextExercise: advancesToNextExercise,
             exercise: exercise
         )
         exercise.rests.append(rest)
         persist()
         notifications.scheduleRestComplete(after: TimeInterval(target))
+        pauseMusicForRest()
     }
 
     func addRest(_ seconds: Int) {
@@ -187,9 +243,18 @@ final class ActiveWorkoutController {
     }
 
     func skipRest() {
+        let shouldAdvance = openRest?.shouldAdvanceToNextExercise == true || hasCompletedPrescribedSets
         finishOpenRest()
         notifications.cancelRestComplete()
         persist()
+        if shouldAdvance {
+            musicPausedForRest = false
+            allowMusicDuringRest = false
+            markCurrentExerciseCompleted()
+            moveToNextExercise()
+        } else {
+            resumeMusicAfterRest()
+        }
     }
 
     func startNextSet() {
@@ -210,17 +275,23 @@ final class ActiveWorkoutController {
 
     func finishExercise(advance: Bool) {
         guard let exercise = currentExercise else { return }
+        if advance, hasNextExercise {
+            if isRestingBeforeNextExercise {
+                skipRest()
+                return
+            }
+            startRest(after: exercise.completedSets.last, exercise: exercise, advancesToNextExercise: true)
+            return
+        }
         finishOpenRest()
         notifications.cancelRestComplete()
-        if exercise.startedAt == nil {
-            exercise.startedAt = .now
-        }
-        exercise.endedAt = .now
-        exercise.status = .completed
-        persist()
-        haptics.exerciseComplete()
+        markCurrentExerciseCompleted()
         if advance {
-            moveToNextExercise()
+            if hasNextExercise {
+                moveToNextExercise()
+            } else {
+                finishWorkout()
+            }
         }
     }
 
@@ -262,6 +333,9 @@ final class ActiveWorkoutController {
     func finishWorkout() {
         finishOpenRest()
         notifications.cancelRestComplete()
+        music.pause()
+        isMusicPlaying = false
+        musicPausedForRest = false
         for exercise in session.orderedExercises where exercise.status == .active || exercise.status == .pending {
             if exercise.completedSets.isEmpty {
                 exercise.status = .skipped
@@ -314,7 +388,9 @@ final class ActiveWorkoutController {
             exercise.status = .active
         }
         persist()
-        playAssignedMusicIfNeeded()
+        if openRest == nil {
+            playAssignedMusicIfNeeded()
+        }
     }
 
     private func restoreCurrentExercise() {
@@ -370,18 +446,62 @@ final class ActiveWorkoutController {
         } else if let lastCompleted = currentExercise?.completedSets.last {
             draftWeightKg = lastCompleted.weightKg ?? draftWeightKg
             draftReps = lastCompleted.reps ?? draftReps
-        } else if let maxReps = prescription?.maxReps, maxReps > 0 {
-            draftReps = min(10, maxReps)
+        } else {
+            if let starting = startingWeightKg {
+                draftWeightKg = starting
+            }
+            if let maxReps = prescription?.maxReps, maxReps > 0 {
+                draftReps = min(10, maxReps)
+            }
         }
         if let duration = prescription?.targetDurationSeconds, duration > 0 {
             draftDurationSeconds = duration
         }
     }
 
-    private func finishOpenRest() {
-        if let rest = openRest {
-            rest.endedAt = .now
+    private var startingWeightKg: Double? {
+        guard let id = currentExercise?.exerciseId else { return nil }
+        if let stored = (try? modelContext.fetch(FetchDescriptor<ExerciseDefinition>()))?
+            .first(where: { $0.id == id })?
+            .defaultWeightKg {
+            return stored
         }
+        return ExerciseLibrarySeed.startingWeightKg[id]
+    }
+
+    private func beginRestAfterCompletedSet(_ set: ExerciseSet, on exercise: ExerciseSession) {
+        let completedCount = max(set.setNumber, exercise.completedSets.map(\.setNumber).max() ?? 0)
+        let moreSetsHere = completedCount < targetSets
+        if moreSetsHere {
+            startRest(after: set, exercise: exercise, advancesToNextExercise: false)
+            return
+        }
+        if hasNextExercise {
+            startRest(after: set, exercise: exercise, advancesToNextExercise: true)
+            return
+        }
+        markCurrentExerciseCompleted()
+        finishWorkout()
+    }
+
+    private func markCurrentExerciseCompleted() {
+        guard let exercise = currentExercise else { return }
+        if exercise.startedAt == nil {
+            exercise.startedAt = .now
+        }
+        exercise.endedAt = .now
+        exercise.status = .completed
+        persist()
+        haptics.exerciseComplete()
+    }
+
+    private func finishOpenRest() {
+        if let exercise = currentExercise {
+            for rest in exercise.rests where rest.isOpen {
+                rest.endedAt = .now
+            }
+        }
+        restActive = false
         restDidFireHaptic = false
     }
 
@@ -389,15 +509,78 @@ final class ActiveWorkoutController {
         try? modelContext.save()
     }
 
-    private func playAssignedMusicIfNeeded() {
-        guard autoPlayExerciseTrack, let exercise = currentExercise else { return }
-        let assignments = (try? modelContext.fetch(FetchDescriptor<MusicAssignment>())) ?? []
-        if let match = assignments.first(where: { $0.exerciseId == exercise.exerciseId && $0.scope == .exercise }) {
-            Task { await music.play(itemID: match.musicItemID, restart: restartExerciseTrack && match.restartFromBeginning) }
+    func pauseMusic() {
+        allowMusicDuringRest = false
+        music.pause()
+        musicPausedForRest = isResting
+        isMusicPlaying = false
+    }
+
+    func stopMusic() {
+        allowMusicDuringRest = false
+        playbackGeneration += 1
+        music.stop()
+        musicPausedForRest = false
+        musicStoppedByUser = true
+        isMusicPlaying = false
+    }
+
+    func playMusic() {
+        musicStoppedByUser = false
+        musicPausedForRest = false
+        allowMusicDuringRest = isResting
+        if music.nowPlaying != nil {
+            music.resume()
+            isMusicPlaying = true
             return
         }
-        if let workoutMusic = assignments.first(where: { $0.template?.id == session.workoutTemplateId && $0.scope == .workout }) {
-            Task { await music.play(itemID: workoutMusic.musicItemID, restart: false) }
+        playAssignedMusicIfNeeded()
+    }
+
+    private func pauseMusicForRest() {
+        allowMusicDuringRest = false
+        music.pause()
+        musicPausedForRest = true
+        isMusicPlaying = false
+    }
+
+    private func resumeMusicAfterRest() {
+        allowMusicDuringRest = false
+        musicPausedForRest = false
+        guard !musicStoppedByUser else { return }
+        music.resume()
+        isMusicPlaying = true
+    }
+
+    private func playAssignedMusicIfNeeded() {
+        guard autoPlayExerciseTrack, !musicStoppedByUser, let exercise = currentExercise else { return }
+        if isResting && !allowMusicDuringRest { return }
+        let assignments = (try? modelContext.fetch(FetchDescriptor<MusicAssignment>())) ?? []
+        let restart: Bool
+        let itemID: String
+        if let match = assignments.first(where: { $0.exerciseId == exercise.exerciseId && $0.scope == .exercise }) {
+            itemID = match.musicItemID
+            restart = restartExerciseTrack && match.restartFromBeginning
+        } else if let workoutMusic = assignments.first(where: { $0.template?.id == session.workoutTemplateId && $0.scope == .workout }) {
+            itemID = workoutMusic.musicItemID
+            restart = false
+        } else {
+            return
+        }
+        playbackGeneration += 1
+        let generation = playbackGeneration
+        Task {
+            await music.play(itemID: itemID, restart: restart)
+            guard generation == playbackGeneration else {
+                music.pause()
+                return
+            }
+            if isResting && !allowMusicDuringRest {
+                music.pause()
+                isMusicPlaying = false
+                return
+            }
+            isMusicPlaying = true
         }
     }
 

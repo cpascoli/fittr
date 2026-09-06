@@ -93,4 +93,159 @@ struct ProgressionAndRecordsTests {
         PlannedLoadService.consume(exerciseId: SeedID.gobletSquat, in: context)
         #expect(PlannedLoadService.weight(for: SeedID.gobletSquat, in: context) == nil)
     }
+
+    @Test @MainActor func lastSetRestsBeforeNextExerciseAndPausesMusic() throws {
+        let container = try FittrSchema.container(inMemory: true)
+        let context = ModelContext(container)
+        let first = exerciseSnapshot(id: SeedID.gobletSquat, name: "Goblet Squat", order: 0)
+        let second = exerciseSnapshot(id: SeedID.romanianDeadlift, name: "Romanian Deadlift", order: 1)
+        let snapshot = TemplateSnapshot(
+            templateId: SeedID.mondayStrength,
+            name: "Full Body Strength",
+            type: .strength,
+            estimatedDurationMinutes: 40,
+            notes: "",
+            exercises: [first, second]
+        )
+        let session = WorkoutSession(
+            name: snapshot.name,
+            type: snapshot.type,
+            source: .manual,
+            templateSnapshotJSON: SnapshotCodec.encode(snapshot),
+            workoutTemplateId: snapshot.templateId
+        )
+        session.exercises = [
+            ExerciseSession(
+                exerciseId: first.exerciseId,
+                exerciseName: first.exerciseName,
+                order: 0,
+                snapshotJSON: SnapshotCodec.encodeExercise(first),
+                workout: session
+            ),
+            ExerciseSession(
+                exerciseId: second.exerciseId,
+                exerciseName: second.exerciseName,
+                order: 1,
+                snapshotJSON: SnapshotCodec.encodeExercise(second),
+                workout: session
+            ),
+        ]
+        context.insert(session)
+        try context.save()
+
+        let music = MockMusicService()
+        music.isPlaying = true
+        music.nowPlaying = MusicTrackInfo(id: "1", title: "Track", artist: "Artist")
+        let controller = ActiveWorkoutController(
+            session: session,
+            modelContext: context,
+            haptics: MockHapticService(),
+            notifications: MockNotificationService(),
+            music: music,
+            settings: nil,
+            profile: nil
+        )
+
+        controller.completeSet()
+        #expect(controller.isResting)
+        #expect(controller.isRestingBeforeNextExercise)
+        #expect(controller.currentExerciseIndex == 0)
+        #expect(controller.nextExerciseName == "Romanian Deadlift")
+        #expect(music.isPlaying == false)
+
+        controller.stopMusic()
+        #expect(music.nowPlaying == nil)
+
+        controller.startNextSet()
+        #expect(controller.currentExerciseIndex == 1)
+        #expect(controller.currentExercise?.exerciseName == "Romanian Deadlift")
+        #expect(controller.isResting == false)
+    }
+
+    @Test @MainActor func secondPrescribedSetRestsThenAdvancesInsteadOfStartingSetThree() throws {
+        let container = try FittrSchema.container(inMemory: true)
+        let context = ModelContext(container)
+        let first = exerciseSnapshot(id: SeedID.gobletSquat, name: "Goblet Squat", order: 0, targetSets: 2)
+        let second = exerciseSnapshot(id: SeedID.romanianDeadlift, name: "Romanian Deadlift", order: 1, targetSets: 2)
+        let snapshot = TemplateSnapshot(
+            templateId: SeedID.mondayStrength,
+            name: "Full Body Strength",
+            type: .strength,
+            estimatedDurationMinutes: 40,
+            notes: "",
+            exercises: [first, second]
+        )
+        let session = WorkoutSession(
+            name: snapshot.name,
+            type: snapshot.type,
+            source: .manual,
+            templateSnapshotJSON: SnapshotCodec.encode(snapshot),
+            workoutTemplateId: snapshot.templateId
+        )
+        session.exercises = [
+            ExerciseSession(
+                exerciseId: first.exerciseId,
+                exerciseName: first.exerciseName,
+                order: 0,
+                snapshotJSON: SnapshotCodec.encodeExercise(first),
+                workout: session
+            ),
+            ExerciseSession(
+                exerciseId: second.exerciseId,
+                exerciseName: second.exerciseName,
+                order: 1,
+                snapshotJSON: SnapshotCodec.encodeExercise(second),
+                workout: session
+            ),
+        ]
+        context.insert(session)
+        try context.save()
+
+        let controller = ActiveWorkoutController(
+            session: session,
+            modelContext: context,
+            haptics: MockHapticService(),
+            notifications: MockNotificationService(),
+            music: MockMusicService(),
+            settings: nil,
+            profile: nil
+        )
+
+        controller.completeSet()
+        #expect(controller.isResting)
+        #expect(controller.isRestingBeforeNextExercise == false)
+        #expect(controller.currentSetNumber == 2)
+
+        controller.startNextSet()
+        controller.completeSet()
+        #expect(controller.isRestingBeforeNextExercise)
+        #expect(controller.currentExerciseIndex == 0)
+        #expect(controller.currentSetNumber == 3)
+
+        controller.startNextSet()
+        #expect(controller.currentExerciseIndex == 1)
+        #expect(controller.currentExercise?.exerciseName == "Romanian Deadlift")
+        #expect(controller.currentSetNumber == 1)
+        #expect(controller.isResting == false)
+    }
+
+    private func exerciseSnapshot(id: UUID, name: String, order: Int, targetSets: Int = 1) -> TemplateExerciseSnapshot {
+        TemplateExerciseSnapshot(
+            id: UUID(),
+            exerciseId: id,
+            exerciseName: name,
+            category: .strength,
+            trackingMode: .repsWeight,
+            laterality: .bilateral,
+            order: order,
+            targetSets: targetSets,
+            minReps: 8,
+            maxReps: 12,
+            targetDurationSeconds: nil,
+            targetRestSeconds: 90,
+            isOptional: false,
+            equipment: .dumbbell,
+            slug: name
+        )
+    }
 }

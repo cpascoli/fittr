@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import UIKit
 
 struct ActiveWorkoutView: View {
     @Bindable var controller: ActiveWorkoutController
@@ -42,7 +43,7 @@ struct ActiveWorkoutView: View {
                 }
             }
             .sheet(isPresented: $controller.showingTechnique) {
-                if let exercise = currentDefinition {
+                if let exercise = techniqueDefinition {
                     TechniqueView(exercise: exercise)
                 }
             }
@@ -68,10 +69,24 @@ struct ActiveWorkoutView: View {
                 Button("Skip exercise") { controller.skipExercise() }
                 Button("Keep it", role: .cancel) {}
             }
-            .onAppear { controller.pulse() }
+            .onAppear {
+                controller.pulse()
+                setIdleTimerDisabled(true)
+            }
+            .onDisappear {
+                setIdleTimerDisabled(false)
+            }
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active {
+                switch phase {
+                case .active:
                     controller.pulse()
+                    setIdleTimerDisabled(true)
+                case .inactive:
+                    break
+                case .background:
+                    setIdleTimerDisabled(false)
+                @unknown default:
+                    break
                 }
             }
             .onReceive(Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()) { _ in
@@ -89,23 +104,27 @@ struct ActiveWorkoutView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     exerciseHeader
-                    previousCard
-                    if controller.isCardio {
-                        CardioLoggerView(controller: controller)
-                    } else if controller.usesDuration {
-                        durationLogger
-                    } else {
-                        SetLoggerView(controller: controller)
-                    }
                     if controller.isResting {
                         RestTimerView(controller: controller)
+                        restTechniquePreview
+                    } else {
+                        previousCard
+                        if controller.isCardio {
+                            CardioLoggerView(controller: controller)
+                        } else if controller.usesDuration {
+                            durationLogger
+                        } else {
+                            SetLoggerView(controller: controller)
+                        }
+                        metaRow
                     }
-                    metaRow
                     musicRow
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(20)
                 .padding(.bottom, 120)
             }
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
             bottomBar
         }
     }
@@ -131,7 +150,10 @@ struct ActiveWorkoutView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(controller.currentExercise?.exerciseName ?? "Exercise")
                 .font(.largeTitle.weight(.bold))
-                .minimumScaleFactor(0.7)
+                .minimumScaleFactor(0.6)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityIdentifier("workout.exerciseName")
             HStack {
                 if let prescription = controller.prescription {
@@ -140,7 +162,11 @@ struct ActiveWorkoutView: View {
                         StatusChip(text: "Optional", color: FittrTheme.warning)
                     }
                 }
-                StatusChip(text: "Set \(controller.currentSetNumber)", color: .white)
+                if controller.isRestingBeforeNextExercise {
+                    StatusChip(text: "Done", color: FittrTheme.success)
+                } else {
+                    StatusChip(text: "Set \(controller.currentSetNumber)", color: .white)
+                }
             }
             if controller.prescription?.isOptional == true {
                 Button("Skip optional — no machine") {
@@ -215,18 +241,27 @@ struct ActiveWorkoutView: View {
     }
 
     private var musicRow: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                VStack(alignment: .leading) {
-                    Text("Music")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(assignedMusicTitle)
-                        .font(.subheadline.weight(.semibold))
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Music")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.secondary)
+            Text(assignedMusicTitle)
+                .font(.subheadline.weight(.semibold))
+            HStack(spacing: 8) {
+                Button(controller.isMusicPlaying ? "Pause" : "Play") {
+                    if controller.isMusicPlaying {
+                        controller.pauseMusic()
+                    } else {
+                        controller.playMusic()
+                    }
                 }
-                Spacer()
-                Button { music.playPause() } label: { Image(systemName: "playpause.fill") }
-                Button { music.next() } label: { Image(systemName: "forward.fill") }
+                .buttonStyle(SecondaryGymButtonStyle())
+                .accessibilityIdentifier("workout.music.playPause")
+                Button("Stop") {
+                    controller.stopMusic()
+                }
+                .buttonStyle(SecondaryGymButtonStyle())
+                .accessibilityIdentifier("workout.music.stop")
             }
             Button("Choose local track") { showingMusicPicker = true }
                 .buttonStyle(SecondaryGymButtonStyle())
@@ -236,28 +271,87 @@ struct ActiveWorkoutView: View {
 
     private var bottomBar: some View {
         VStack(spacing: 10) {
-            if !controller.isResting {
-                Button("COMPLETE SET") {
+            if controller.isResting {
+                Button(controller.isRestingBeforeNextExercise ? "START NEXT EXERCISE" : "START NEXT SET") {
+                    controller.startNextSet()
+                }
+                .buttonStyle(GymButtonStyle())
+                .accessibilityIdentifier("workout.startNextSet")
+                HStack(spacing: 8) {
+                    Button("+15s") { controller.addRest(15) }
+                        .buttonStyle(SecondaryGymButtonStyle())
+                        .accessibilityIdentifier("workout.addRest15")
+                    Button("+30s") { controller.addRest(30) }
+                        .buttonStyle(SecondaryGymButtonStyle())
+                        .accessibilityIdentifier("workout.addRest30")
+                    Button("Skip Rest") { controller.skipRest() }
+                        .buttonStyle(SecondaryGymButtonStyle())
+                        .accessibilityIdentifier("workout.skipRest")
+                }
+            } else {
+                Button("COMPLETE SET \(controller.currentSetNumber)") {
                     controller.completeSet()
                 }
                 .buttonStyle(GymButtonStyle())
                 .accessibilityIdentifier("workout.completeSet")
-            }
-            HStack {
-                Button("Finish Exercise") { controller.finishExercise(advance: true) }
-                    .buttonStyle(SecondaryGymButtonStyle())
-                    .accessibilityIdentifier("workout.finishExercise")
-                Button("Add Set") { controller.addSet() }
-                    .buttonStyle(SecondaryGymButtonStyle())
+                HStack {
+                    Button("Finish Exercise") { controller.finishExercise(advance: true) }
+                        .buttonStyle(SecondaryGymButtonStyle())
+                        .accessibilityIdentifier("workout.finishExercise")
+                    Button("Add Set") { controller.addSet() }
+                        .buttonStyle(SecondaryGymButtonStyle())
+                }
             }
         }
         .padding(16)
         .background(.ultraThinMaterial)
     }
 
-    private var currentDefinition: ExerciseDefinition? {
-        guard let id = controller.currentExercise?.exerciseId else { return nil }
+    private var restTechniquePreview: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(controller.isRestingBeforeNextExercise ? "NEXT EXERCISE" : "TECHNIQUE")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.secondary)
+            if let definition = techniqueDefinition {
+                Text(definition.name)
+                    .font(.title2.weight(.bold))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.7)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                TechniqueClipView(exercise: definition, height: 240)
+                    .id(definition.id)
+                    .frame(maxWidth: .infinity)
+                if let cue = definition.coachingCues.first {
+                    Text(cue)
+                        .foregroundStyle(.secondary)
+                }
+                Button {
+                    controller.showingTechnique = true
+                } label: {
+                    Label("Show Technique", systemImage: "play.rectangle.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(SecondaryGymButtonStyle())
+                .accessibilityIdentifier("workout.technique")
+            } else {
+                Text("Technique clip unavailable for this exercise.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .fittrCard()
+    }
+
+    private var techniqueDefinition: ExerciseDefinition? {
+        definition(for: controller.techniqueExerciseId)
+    }
+
+    private func definition(for id: UUID?) -> ExerciseDefinition? {
+        guard let id else { return nil }
         return library.first { $0.id == id }
+    }
+
+    private func setIdleTimerDisabled(_ disabled: Bool) {
+        UIApplication.shared.isIdleTimerDisabled = disabled
     }
 
     private var assignedMusicTitle: String {

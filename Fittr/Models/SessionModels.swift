@@ -267,9 +267,11 @@ final class RestInterval {
     var startedAt: Date
     var endedAt: Date?
     var afterSetId: UUID?
+    var advancesToNextExercise: Bool?
     var exercise: ExerciseSession?
 
     var isOpen: Bool { endedAt == nil }
+    var shouldAdvanceToNextExercise: Bool { advancesToNextExercise == true }
 
     init(
         id: UUID = UUID(),
@@ -277,6 +279,7 @@ final class RestInterval {
         startedAt: Date = .now,
         endedAt: Date? = nil,
         afterSetId: UUID? = nil,
+        advancesToNextExercise: Bool = false,
         exercise: ExerciseSession? = nil
     ) {
         self.id = id
@@ -284,6 +287,7 @@ final class RestInterval {
         self.startedAt = startedAt
         self.endedAt = endedAt
         self.afterSetId = afterSetId
+        self.advancesToNextExercise = advancesToNextExercise
         self.exercise = exercise
     }
 }

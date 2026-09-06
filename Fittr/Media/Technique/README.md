@@ -1,20 +1,17 @@
-# Technique videos
+# Technique clips
 
-Drop a silent, looping `.mp4` here named after the exercise slug:
+Strength exercises use two-frame illustrated loops named `slug-1.jpg` and `slug-2.jpg`. The rest screen and Technique view flip between them about once a second.
 
-- `goblet-squat.mp4`
-- `dumbbell-romanian-deadlift.mp4`
-- `dumbbell-chest-press.mp4`
-- `one-arm-dumbbell-row.mp4`
-- `dumbbell-shoulder-press.mp4`
-- `lat-pulldown.mp4`
-- `plank.mp4`
-- `indoor-cycling.mp4`
-- `treadmill-walking.mp4`
-- `walking.mp4`
-- `swimming.mp4`
-- `mobility.mp4`
+Current clips:
 
-The app looks these up with `Bundle.main.url(forResource: slug, withExtension: "mp4")`. Playback is muted and looped so Apple Music can keep playing.
+- `goblet-squat-1.jpg` / `goblet-squat-2.jpg`
+- `dumbbell-romanian-deadlift-1.jpg` / `dumbbell-romanian-deadlift-2.jpg`
+- `dumbbell-chest-press-1.jpg` / `dumbbell-chest-press-2.jpg`
+- `one-arm-dumbbell-row-1.jpg` / `one-arm-dumbbell-row-2.jpg`
+- `dumbbell-shoulder-press-1.jpg` / `dumbbell-shoulder-press-2.jpg`
+- `lat-pulldown-1.jpg` / `lat-pulldown-2.jpg`
+- `plank-1.jpg`
 
-Do not add copyrighted exercise videos without permission.
+If a silent `slug.mp4` is added later, that video is used instead.
+
+These are original instructional illustrations, not filmed or copyrighted gym footage.

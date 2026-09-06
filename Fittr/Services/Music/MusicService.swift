@@ -32,6 +32,9 @@ protocol MusicServicing: AnyObject {
     func play(itemID: String, restart: Bool) async
     func preview(itemID: String, seconds: TimeInterval) async
     func playPause()
+    func pause()
+    func resume()
+    func stop()
     func next()
     func previous()
 }
@@ -40,6 +43,8 @@ protocol MusicServicing: AnyObject {
 final class MusicService: MusicServicing {
     private(set) var isAuthorized = false
     private(set) var nowPlaying: MusicTrackInfo?
+    private var pausedAt: TimeInterval?
+    private var holdQueue = false
 
     var isPlaying: Bool {
         MPMusicPlayerController.systemMusicPlayer.playbackState == .playing
@@ -103,13 +108,29 @@ final class MusicService: MusicServicing {
             )
         )
         guard let item = query.items?.first else { return }
-        let collection = MPMediaItemCollection(items: [item])
         let systemPlayer = MPMusicPlayerController.systemMusicPlayer
-        systemPlayer.setQueue(with: collection)
-        systemPlayer.play()
+        let alreadyQueued = systemPlayer.nowPlayingItem?.persistentID == persistentID
         if restart {
+            holdQueue = false
+            pausedAt = nil
+            systemPlayer.setQueue(with: MPMediaItemCollection(items: [item]))
+            systemPlayer.play()
             systemPlayer.currentPlaybackTime = 0
+            nowPlaying = Self.track(from: item)
+            return
         }
+        if holdQueue || alreadyQueued {
+            if holdQueue {
+                resume()
+            } else {
+                systemPlayer.play()
+            }
+            nowPlaying = Self.track(from: item)
+            return
+        }
+        pausedAt = nil
+        systemPlayer.setQueue(with: MPMediaItemCollection(items: [item]))
+        systemPlayer.play()
         nowPlaying = Self.track(from: item)
     }
 
@@ -120,12 +141,38 @@ final class MusicService: MusicServicing {
     }
 
     func playPause() {
-        let systemPlayer = MPMusicPlayerController.systemMusicPlayer
-        if systemPlayer.playbackState == .playing {
-            systemPlayer.pause()
+        if isPlaying {
+            pause()
         } else {
-            systemPlayer.play()
+            resume()
         }
+    }
+
+    func pause() {
+        let systemPlayer = MPMusicPlayerController.systemMusicPlayer
+        pausedAt = Self.sanitizedTime(systemPlayer.currentPlaybackTime)
+        holdQueue = true
+        systemPlayer.pause()
+    }
+
+    func resume() {
+        holdQueue = false
+        let systemPlayer = MPMusicPlayerController.systemMusicPlayer
+        let time = pausedAt
+        systemPlayer.play()
+        restorePlaybackTime(time, on: systemPlayer)
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(80))
+            restorePlaybackTime(time, on: systemPlayer)
+        }
+    }
+
+    func stop() {
+        let systemPlayer = MPMusicPlayerController.systemMusicPlayer
+        holdQueue = false
+        pausedAt = nil
+        systemPlayer.stop()
+        nowPlaying = nil
     }
 
     func next() {
@@ -134,6 +181,16 @@ final class MusicService: MusicServicing {
 
     func previous() {
         MPMusicPlayerController.systemMusicPlayer.skipToPreviousItem()
+    }
+
+    private func restorePlaybackTime(_ time: TimeInterval?, on player: MPMusicPlayerController) {
+        guard let time, time.isFinite, time >= 0 else { return }
+        player.currentPlaybackTime = time
+    }
+
+    private static func sanitizedTime(_ time: TimeInterval) -> TimeInterval? {
+        guard time.isFinite, time >= 0 else { return nil }
+        return time
     }
 
     private func ensureAuthorized() async -> Bool {
@@ -200,6 +257,16 @@ final class MockMusicService: MusicServicing {
     }
 
     func playPause() { isPlaying.toggle() }
+
+    func pause() { isPlaying = false }
+
+    func resume() { isPlaying = true }
+
+    func stop() {
+        isPlaying = false
+        nowPlaying = nil
+    }
+
     func next() {}
     func previous() {}
 }

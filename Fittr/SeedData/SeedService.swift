@@ -6,6 +6,7 @@ enum SeedService {
     static func seedIfNeeded(in context: ModelContext) throws -> Bool {
         let existing = try context.fetch(FetchDescriptor<ExerciseDefinition>())
         if !existing.isEmpty {
+            applyStartingLoads(to: existing, in: context)
             try ScheduleService.ensureUpcomingSchedule(in: context)
             return false
         }
@@ -35,5 +36,21 @@ enum SeedService {
         try context.save()
         try ScheduleService.ensureUpcomingSchedule(in: context)
         return true
+    }
+
+    private static func applyStartingLoads(to definitions: [ExerciseDefinition], in context: ModelContext) {
+        for definition in definitions {
+            if definition.defaultWeightKg == nil, let weight = ExerciseLibrarySeed.startingWeightKg[definition.id] {
+                definition.defaultWeightKg = weight
+            }
+            if definition.id == SeedID.plank, definition.defaultDurationSeconds == 25 {
+                definition.defaultDurationSeconds = ExerciseLibrarySeed.plankTargetSeconds
+            }
+        }
+        let items = (try? context.fetch(FetchDescriptor<WorkoutTemplateExercise>())) ?? []
+        for item in items where item.exercise?.id == SeedID.plank && item.targetDurationSeconds == 25 {
+            item.targetDurationSeconds = ExerciseLibrarySeed.plankTargetSeconds
+        }
+        try? context.save()
     }
 }

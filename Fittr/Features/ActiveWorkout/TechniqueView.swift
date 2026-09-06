@@ -1,16 +1,15 @@
 import AVKit
 import SwiftUI
+import UIKit
 
 struct TechniqueView: View {
     let exercise: ExerciseDefinition
-    @State private var player: AVQueuePlayer?
-    @State private var looper: AVPlayerLooper?
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    video
+                    TechniqueClipView(exercise: exercise)
                     Text(exercise.name)
                         .font(.largeTitle.weight(.bold))
                     section("Setup", exercise.setupInstructions)
@@ -27,35 +26,6 @@ struct TechniqueView: View {
             .background(FittrTheme.background)
             .navigationTitle("Technique")
             .navigationBarTitleDisplayMode(.inline)
-            .onAppear { configurePlayer() }
-            .onDisappear {
-                player?.pause()
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var video: some View {
-        if let player {
-            VideoPlayer(player: player)
-                .frame(height: 220)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .disabled(true)
-        } else {
-            ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(FittrTheme.cardElevated)
-                    .frame(height: 220)
-                VStack(spacing: 8) {
-                    Image(systemName: "figure.strengthtraining.traditional")
-                        .font(.largeTitle)
-                    Text("Add \(exercise.slug).mp4 in Media/Technique to replace this placeholder.")
-                        .font(.caption)
-                        .multilineTextAlignment(.center)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal)
-                }
-            }
         }
     }
 
@@ -74,27 +44,107 @@ struct TechniqueView: View {
             }
         }
     }
+}
 
-    private func configurePlayer() {
-        guard let url = TechniqueMedia.url(for: exercise) else { return }
-        let item = AVPlayerItem(url: url)
-        let queue = AVQueuePlayer(playerItem: item)
-        queue.isMuted = true
-        looper = AVPlayerLooper(player: queue, templateItem: item)
-        queue.play()
-        player = queue
+struct TechniqueClipView: View {
+    let exercise: ExerciseDefinition
+    var height: CGFloat = 220
+    @State private var player: AVQueuePlayer?
+    @State private var looper: AVPlayerLooper?
+    @State private var frameImages: [UIImage] = []
+    @State private var frameIndex = 0
+
+    var body: some View {
+        Group {
+            if let player {
+                VideoPlayer(player: player)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: height)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .disabled(true)
+            } else if !frameImages.isEmpty {
+                Image(uiImage: frameImages[frameIndex % frameImages.count])
+                    .resizable()
+                    .scaledToFill()
+                    .frame(maxWidth: .infinity)
+                    .frame(height: height)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            } else {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(FittrTheme.cardElevated)
+                        .frame(height: height)
+                    VStack(spacing: 8) {
+                        Image(systemName: "figure.strengthtraining.traditional")
+                            .font(.largeTitle)
+                        Text(exercise.name)
+                            .font(.headline)
+                        Text("Technique clip unavailable.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .accessibilityIdentifier("workout.techniqueClip")
+        .onAppear { configureMedia() }
+        .onDisappear { player?.pause() }
+        .onReceive(Timer.publish(every: 0.9, on: .main, in: .common).autoconnect()) { _ in
+            guard frameImages.count > 1, player == nil else { return }
+            frameIndex = (frameIndex + 1) % frameImages.count
+        }
+    }
+
+    private func configureMedia() {
+        if let url = TechniqueMedia.videoURL(for: exercise) {
+            let item = AVPlayerItem(url: url)
+            let queue = AVQueuePlayer(playerItem: item)
+            queue.isMuted = true
+            looper = AVPlayerLooper(player: queue, templateItem: item)
+            queue.play()
+            player = queue
+            return
+        }
+        frameImages = TechniqueMedia.frameImages(for: exercise)
+        frameIndex = 0
     }
 }
 
 enum TechniqueMedia {
-    static func url(for exercise: ExerciseDefinition) -> URL? {
-        let name = exercise.localVideoName.isEmpty ? exercise.slug : exercise.localVideoName
-        if let bundled = Bundle.main.url(forResource: name, withExtension: "mp4") {
+    static func videoURL(for exercise: ExerciseDefinition) -> URL? {
+        let name = resourceName(for: exercise)
+        if let bundled = bundledResource(name, extension: "mp4") {
             return bundled
         }
         if !exercise.remoteVideoURL.isEmpty, let remote = URL(string: exercise.remoteVideoURL) {
             return remote
         }
         return nil
+    }
+
+    static func url(for exercise: ExerciseDefinition) -> URL? {
+        videoURL(for: exercise)
+    }
+
+    static func frameImages(for exercise: ExerciseDefinition) -> [UIImage] {
+        let name = resourceName(for: exercise)
+        return (1...4).compactMap { index in
+            let resource = "\(name)-\(index)"
+            if let named = UIImage(named: resource) {
+                return named
+            }
+            return bundledResource(resource, extension: "jpg")
+                .flatMap { UIImage(contentsOfFile: $0.path) }
+        }
+    }
+
+    private static func resourceName(for exercise: ExerciseDefinition) -> String {
+        exercise.localVideoName.isEmpty ? exercise.slug : exercise.localVideoName
+    }
+
+    private static func bundledResource(_ name: String, extension ext: String) -> URL? {
+        Bundle.main.url(forResource: name, withExtension: ext)
+            ?? Bundle.main.url(forResource: name, withExtension: ext, subdirectory: "Media/Technique")
     }
 }
