@@ -20,19 +20,12 @@ struct RootTabView: View {
                 .tabItem { Label("Settings", systemImage: "gearshape") }
         }
         .fullScreenCover(item: $presentedSession) { session in
-            if let settings = settings.first {
-                ActiveWorkoutView(
-                    controller: ActiveWorkoutController(
-                        session: session,
-                        modelContext: FittrDependencies.shared.modelContext ?? session.modelContext!,
-                        haptics: FittrDependencies.shared.haptics,
-                        notifications: FittrDependencies.shared.notifications,
-                        music: FittrDependencies.shared.music,
-                        settings: settings,
-                        profile: profiles.first
-                    )
-                )
-            }
+            ActiveWorkoutHost(
+                session: session,
+                settings: settings.first,
+                profile: profiles.first,
+                modelContext: FittrDependencies.shared.modelContext ?? session.modelContext
+            )
         }
     }
 }

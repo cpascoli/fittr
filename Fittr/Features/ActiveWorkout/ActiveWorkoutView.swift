@@ -9,6 +9,7 @@ struct ActiveWorkoutView: View {
     @Query(sort: \ExerciseDefinition.name) private var library: [ExerciseDefinition]
     @Query private var settings: [AppSettings]
     @Query private var assignments: [MusicAssignment]
+    @Query(sort: \UserProfile.createdAt) private var profiles: [UserProfile]
     @State private var showingMusicPicker = false
     @State private var confirmSkipOptional = false
     @Environment(\.scenePhase) private var scenePhase
@@ -16,13 +17,16 @@ struct ActiveWorkoutView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                FittrTheme.background.ignoresSafeArea()
+                (controller.isResting ? FittrTheme.restBackgroundGradient : FittrTheme.backgroundGradient)
+                    .ignoresSafeArea()
+                    .animation(.easeInOut(duration: 0.35), value: controller.isResting)
                 if controller.showingSummary {
                     WorkoutSummaryView(controller: controller) {
                         dismiss()
                     }
                 } else {
                     workoutBody
+                        .frame(minWidth: 0, maxWidth: .infinity)
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -71,8 +75,12 @@ struct ActiveWorkoutView: View {
             }
             .onAppear {
                 controller.pulse()
+                syncUnits()
                 setIdleTimerDisabled(true)
             }
+            // The controller captured units at init; switching them in Settings
+            // should reach a session already underway.
+            .onChange(of: profiles.first?.liftingUnits) { _, _ in syncUnits() }
             .onDisappear {
                 setIdleTimerDisabled(false)
             }
@@ -101,18 +109,26 @@ struct ActiveWorkoutView: View {
             header
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
-            ScrollView {
+            ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 18) {
                     exerciseHeader
                     if controller.isResting {
                         RestTimerView(controller: controller)
                         restTechniquePreview
+                    } else if controller.usesDuration {
+                        // For a timed hold the clock is the control, not a
+                        // reference, so it outranks the technique clip for the
+                        // space above the fold — you must be able to start it
+                        // without scrolling.
+                        HoldTimerView(controller: controller)
+                        techniqueGlance
+                        previousCard
+                        metaRow
                     } else {
+                        techniqueGlance
                         previousCard
                         if controller.isCardio {
                             CardioLoggerView(controller: controller)
-                        } else if controller.usesDuration {
-                            durationLogger
                         } else {
                             SetLoggerView(controller: controller)
                         }
@@ -120,13 +136,16 @@ struct ActiveWorkoutView: View {
                     }
                     musicRow
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(20)
                 .padding(.bottom, 120)
+                .containerRelativeFrame(.horizontal, alignment: .leading)
             }
-            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            .scrollIndicators(.hidden)
             bottomBar
+                .frame(maxWidth: .infinity)
         }
+        .frame(minWidth: 0, maxWidth: .infinity)
+        .clipped()
     }
 
     private var header: some View {
@@ -142,7 +161,7 @@ struct ActiveWorkoutView: View {
             Spacer()
             Text("\(controller.currentExerciseIndex + 1) / \(max(controller.session.orderedExercises.count, 1))")
                 .font(.headline.monospacedDigit())
-                .foregroundStyle(FittrTheme.accent)
+                .foregroundStyle(controller.isResting ? FittrTheme.restAccent : FittrTheme.accent)
         }
     }
 
@@ -178,7 +197,20 @@ struct ActiveWorkoutView: View {
         }
     }
 
+    @ViewBuilder
     private var previousCard: some View {
+        if controller.previousWorkout == nil {
+            // One line, not a whole card: on a first session this said nothing
+            // and cost the vertical space the technique clip now uses.
+            Text("No previous session yet — values start from useful defaults.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        } else {
+            previousSetsCard
+        }
+    }
+
+    private var previousSetsCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let previous = controller.previousWorkout {
                 Text("LAST TIME — \(previous.startedAt.formatted(date: .abbreviated, time: .omitted))")
@@ -201,42 +233,23 @@ struct ActiveWorkoutView: View {
                     .buttonStyle(SecondaryGymButtonStyle())
                     .accessibilityIdentifier("workout.copyLast")
                 }
-            } else {
-                Text("No previous session yet. Values start from useful defaults.")
-                    .foregroundStyle(.secondary)
             }
         }
         .fittrCard()
     }
 
-    private var durationLogger: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            StepperControl(
-                title: "Seconds",
-                valueText: "\(controller.draftDurationSeconds)",
-                decrement: { controller.draftDurationSeconds = max(5, controller.draftDurationSeconds - 5) },
-                increment: { controller.draftDurationSeconds += 5 }
-            )
-        }
-        .fittrCard()
-    }
 
     private var metaRow: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             if let prescription = controller.prescription {
-                if let min = prescription.minReps, let max = prescription.maxReps, max > 0 {
-                    Text("Target: \(min)–\(max) reps · RIR 3–4")
+                VStack(alignment: .leading, spacing: 4) {
+                    if let min = prescription.minReps, let max = prescription.maxReps, max > 0 {
+                        Text("Target: \(min)–\(max) reps · RIR 3–4")
+                    }
+                    Text("Suggested rest: \(prescription.targetRestSeconds) sec")
                 }
-                Text("Suggested rest: \(prescription.targetRestSeconds) sec")
             }
-            Button {
-                controller.showingTechnique = true
-            } label: {
-                Label("Show Technique", systemImage: "play.rectangle.fill")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(SecondaryGymButtonStyle())
-            .accessibilityIdentifier("workout.technique")
+
         }
     }
 
@@ -279,15 +292,16 @@ struct ActiveWorkoutView: View {
                 .accessibilityIdentifier("workout.startNextSet")
                 HStack(spacing: 8) {
                     Button("+15s") { controller.addRest(15) }
-                        .buttonStyle(SecondaryGymButtonStyle())
+                        .buttonStyle(SecondaryGymButtonStyle(compact: true))
                         .accessibilityIdentifier("workout.addRest15")
                     Button("+30s") { controller.addRest(30) }
-                        .buttonStyle(SecondaryGymButtonStyle())
+                        .buttonStyle(SecondaryGymButtonStyle(compact: true))
                         .accessibilityIdentifier("workout.addRest30")
                     Button("Skip Rest") { controller.skipRest() }
-                        .buttonStyle(SecondaryGymButtonStyle())
+                        .buttonStyle(SecondaryGymButtonStyle(compact: true))
                         .accessibilityIdentifier("workout.skipRest")
                 }
+                .frame(maxWidth: .infinity)
             } else {
                 Button("COMPLETE SET \(controller.currentSetNumber)") {
                     controller.completeSet()
@@ -304,23 +318,64 @@ struct ActiveWorkoutView: View {
             }
         }
         .padding(16)
+        .frame(maxWidth: .infinity)
         .background(.ultraThinMaterial)
     }
 
-    private var restTechniquePreview: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(controller.isRestingBeforeNextExercise ? "NEXT EXERCISE" : "TECHNIQUE")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.secondary)
-            if let definition = techniqueDefinition {
-                Text(definition.name)
-                    .font(.title2.weight(.bold))
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.7)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                TechniqueClipView(exercise: definition, height: 240)
+    /// A compact, tappable still of the movement, sitting directly under the
+    /// exercise name so it is visible without scrolling. Tapping opens the full
+    /// technique sheet — cues and common mistakes live there, not here, because
+    /// anything taller pushes the weight and rep steppers off screen.
+    @ViewBuilder
+    private var techniqueGlance: some View {
+        if let definition = techniqueDefinition {
+            Button {
+                controller.showingTechnique = true
+            } label: {
+                TechniqueClipView(exercise: definition, height: 140)
                     .id(definition.id)
-                    .frame(maxWidth: .infinity)
+                    .frame(minWidth: 0, maxWidth: .infinity)
+                    .overlay(alignment: .bottomTrailing) {
+                        Image(systemName: "play.circle.fill")
+                            .font(.title2)
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(.white, .black.opacity(0.45))
+                            .padding(10)
+                    }
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("workout.technique")
+            .accessibilityLabel("Technique for \(definition.name)")
+            .accessibilityHint("Opens setup, movement and coaching cues")
+        }
+    }
+
+    private var restTechniquePreview: some View {
+        techniqueCard(
+            height: 240,
+            heading: controller.isRestingBeforeNextExercise ? "Next exercise" : "Technique",
+            showsName: true
+        )
+    }
+
+    /// The looping technique clip, its first coaching cue, and the way into the
+    /// full instructions. Shared by the rest phase and the set-logging phase so
+    /// the movement is visible before a set, not only between sets.
+    @ViewBuilder
+    private func techniqueCard(height: CGFloat, heading: String, showsName: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionLabel(text: heading)
+            if let definition = techniqueDefinition {
+                if showsName {
+                    Text(definition.name)
+                        .font(.title2.weight(.bold))
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.7)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                TechniqueClipView(exercise: definition, height: height)
+                    .id(definition.id)
+                    .frame(minWidth: 0, maxWidth: .infinity)
                 if let cue = definition.coachingCues.first {
                     Text(cue)
                         .foregroundStyle(.secondary)
@@ -348,6 +403,12 @@ struct ActiveWorkoutView: View {
     private func definition(for id: UUID?) -> ExerciseDefinition? {
         guard let id else { return nil }
         return library.first { $0.id == id }
+    }
+
+    private func syncUnits() {
+        if let preferred = profiles.first?.liftingUnits {
+            controller.units = preferred
+        }
     }
 
     private func setIdleTimerDisabled(_ disabled: Bool) {

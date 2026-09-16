@@ -4,24 +4,31 @@ import SwiftUI
 @main
 struct FittrApp: App {
     @State private var presentedSession: WorkoutSession?
-    private let container: ModelContainer
+    @State private var storeState: StoreState
 
     init() {
         if LaunchArguments.isUITesting {
             FittrDependencies.shared.configureForUITesting()
         }
-        do {
-            container = try FittrSchema.container(inMemory: LaunchArguments.isUITesting)
-        } catch {
-            fatalError("Failed to create Fittr store: \(error)")
-        }
+        // A store that will not open is a state to render, not a reason to trap:
+        // this device holds the only copy of the training history.
+        _storeState = State(initialValue: FittrSchema.openStore(inMemory: LaunchArguments.isUITesting))
     }
 
     var body: some Scene {
         WindowGroup {
-            ContentView(presentedSession: $presentedSession)
-                .modelContainer(container)
-                .preferredColorScheme(.dark)
+            Group {
+                switch storeState {
+                case .ready(let container):
+                    ContentView(presentedSession: $presentedSession)
+                        .modelContainer(container)
+                case .failed(let failure):
+                    StoreRecoveryView(failure: failure) {
+                        storeState = FittrSchema.openStore(inMemory: LaunchArguments.isUITesting)
+                    }
+                }
+            }
+            .preferredColorScheme(.dark)
         }
     }
 }

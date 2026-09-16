@@ -16,16 +16,19 @@ struct OnboardingView: View {
                         .foregroundStyle(.secondary)
                     DatePicker("Date of birth", selection: $profile.dateOfBirth, displayedComponents: .date)
                     LabeledContent("Height", value: "\(Int(profile.heightCm)) cm")
-                    LabeledContent("Starting weight", value: String(format: "%.1f kg", profile.startingWeightKg))
+                    LabeledContent(
+                        "Starting weight",
+                        value: NumberFormatting.weight(profile.startingWeightKg, units: .metric)
+                    )
                     Stepper(
-                        "Target \(String(format: "%.1f", profile.targetWeightKg)) kg",
+                        "Target \(NumberFormatting.weight(profile.targetWeightKg, units: .metric))",
                         value: $profile.targetWeightKg,
                         in: 70...100,
                         step: 0.5
                     )
-                    Picker("Units", selection: $profile.preferredUnits) {
+                    Picker("Lifting weights", selection: $profile.liftingUnits) {
                         ForEach(UnitSystem.allCases) { system in
-                            Text(system.title).tag(system)
+                            Text(system.weightTitle).tag(system)
                         }
                     }
                 }

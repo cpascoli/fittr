@@ -52,6 +52,36 @@ final class WorkoutFlowUITests: XCTestCase {
         save.tap()
 
         app.tabBars.buttons["History"].tap()
-        XCTAssertTrue(app.staticTexts["Full Body Strength"].waitForExistence(timeout: 6))
+        // The row reads "<date> — <name>, <summary>", so assert on the row's
+        // identifier and match the name by containment rather than equality.
+        let historyRow = app.buttons["history.row"].firstMatch
+        XCTAssertTrue(historyRow.waitForExistence(timeout: 6))
+        XCTAssertTrue(historyRow.label.contains("Full Body Strength"))
     }
+
+    /// The plank timer is useless if you have to scroll to start it. This broke
+    /// twice while the hold timer was being laid out, so it is asserted.
+    func testPlankHoldTimerIsReachableWithoutScrolling() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--uitesting", "--reset-store"]
+        app.launch()
+
+        XCTAssertTrue(app.buttons["today.start"].waitForExistence(timeout: 10))
+        app.buttons["today.start"].tap()
+        XCTAssertTrue(app.staticTexts["workout.exerciseName"].waitForExistence(timeout: 6))
+
+        // Skip the six weighted exercises to reach the plank.
+        for _ in 0..<6 {
+            app.buttons["workout.menu"].tap()
+            app.buttons["Skip exercise"].tap()
+        }
+
+        let start = app.buttons["workout.startHold"]
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        XCTAssertTrue(start.isHittable, "START HOLD must be on screen without scrolling")
+
+        start.tap()
+        XCTAssertTrue(app.buttons["workout.stopHold"].waitForExistence(timeout: 3))
+    }
+
 }

@@ -12,6 +12,15 @@ enum UnitSystem: String, Codable, CaseIterable, Identifiable {
         case .imperial: "Imperial (lb, mi)"
         }
     }
+
+    /// Used where the choice is only about weight, so "Metric" would be vaguer
+    /// than naming the unit outright.
+    var weightTitle: String {
+        switch self {
+        case .metric: "Kilograms (kg)"
+        case .imperial: "Pounds (lb)"
+        }
+    }
 }
 
 enum ExerciseCategory: String, Codable, CaseIterable, Identifiable {

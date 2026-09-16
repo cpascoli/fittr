@@ -31,7 +31,7 @@ struct AnalyticsView: View {
                 }
                 .padding(20)
             }
-            .background(FittrTheme.background)
+            .background(FittrTheme.backgroundGradient.ignoresSafeArea())
             .navigationTitle("Analytics")
         }
     }
@@ -48,11 +48,9 @@ struct AnalyticsView: View {
 
     private var strengthSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("STRENGTH")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.secondary)
+            SectionLabel(text: "Strength")
             let strength = filteredSessions.filter { $0.type == .strength }
-            MetricTile(title: "Weekly volume", value: NumberFormatting.volume(currentWeeklyVolume, units: .metric))
+            MetricTile(title: "Weekly volume", value: NumberFormatting.volume(currentWeeklyVolume, units: units))
             chart("Training volume", points: volumePoints(strength))
             chart("Sets / week", points: weeklyCount(strength, value: { Double($0.completedSetCount) }))
             if let exerciseId = selectedExerciseId ?? strengthExercises.first?.id {
@@ -75,13 +73,11 @@ struct AnalyticsView: View {
 
     private var cardioSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("CARDIO & SWIM")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.secondary)
+            SectionLabel(text: "Cardio & swim")
             let cardio = filteredSessions.filter { $0.type == .cardio || $0.type == .swimming }
             if cardio.isEmpty {
-                Text("No cardio or swim sessions in this range.")
-                    .foregroundStyle(.secondary)
+                EmptyHint(text: "No cardio or swim sessions in this range", systemImage: "figure.pool.swim")
+                    .fittrCard(.subtle)
             } else {
                 chart("Minutes / week", points: weeklyCount(cardio, value: { $0.elapsed() / 60 }))
                 chart("Distance (km)", points: cardio.compactMap { session in
@@ -95,9 +91,7 @@ struct AnalyticsView: View {
 
     private var bodySection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("BODY")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.secondary)
+            SectionLabel(text: "Body")
             Picker("Weight range", selection: $weightRange) {
                 ForEach(BodyWeightChartRange.allCases) { item in
                     Text(item.title).tag(item)
@@ -106,22 +100,27 @@ struct AnalyticsView: View {
             .pickerStyle(.segmented)
             let series = filteredWeights
             if series.isEmpty {
-                Text("No body-weight entries yet.")
-                    .foregroundStyle(.secondary)
+                EmptyHint(text: "No body-weight entries yet", systemImage: "scalemass")
             } else {
                 Chart {
                     ForEach(series, id: \.id) { entry in
-                        PointMark(x: .value("Date", entry.recordedAt), y: .value("kg", entry.weightKg))
+                        PointMark(
+                            x: .value("Date", entry.recordedAt),
+                            y: .value("kg", entry.weightKg)
+                        )
                     }
                     ForEach(WorkoutMath.movingAverage(values: series.map { DatedValue(date: $0.recordedAt, value: $0.weightKg) }), id: \.date) { point in
-                        LineMark(x: .value("Date", point.date), y: .value("Average", point.value))
+                        LineMark(
+                            x: .value("Date", point.date),
+                            y: .value("Average", point.value)
+                        )
                             .foregroundStyle(FittrTheme.accent)
                     }
                 }
                 .frame(height: 180)
                 if let profile = profiles.first, let latest = series.last {
-                    Text("Change from start: \(String(format: "%+.1f", latest.weightKg - profile.startingWeightKg)) kg")
-                    Text("Target \(String(format: "%.0f", profile.targetWeightKg)) kg is a personal target, not a predicted date.")
+                    Text("Change from start: \(NumberFormatting.signedWeight(latest.weightKg - profile.startingWeightKg, units: .metric))")
+                    Text("Target \(NumberFormatting.weight(profile.targetWeightKg, units: .metric)) is a personal target, not a predicted date.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -133,9 +132,7 @@ struct AnalyticsView: View {
     private var adherenceSection: some View {
         let stats = AnalyticsEngine.adherence(planned: scheduled.filter { $0.template?.isOptionalDay == false })
         return VStack(alignment: .leading, spacing: 8) {
-            Text("ADHERENCE")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.secondary)
+            SectionLabel(text: "Adherence")
             Text("Planned \(stats.planned) · Completed \(stats.completed) · Skipped \(stats.skipped)")
             Text("\(Int((stats.percent * 100).rounded()))% completion")
                 .font(.title3.weight(.semibold))
@@ -145,12 +142,9 @@ struct AnalyticsView: View {
 
     private var recordsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("PERSONAL RECORDS")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.secondary)
+            SectionLabel(text: "Personal records")
             if records.isEmpty {
-                Text("PRs appear after meaningful bests, not after every session.")
-                    .foregroundStyle(.secondary)
+                EmptyHint(text: "PRs appear after meaningful bests, not every session", systemImage: "trophy")
             } else {
                 ForEach(records.prefix(8), id: \.id) { record in
                     Text("\(record.kind.title) · \(record.exerciseName)")
@@ -159,6 +153,9 @@ struct AnalyticsView: View {
         }
         .fittrCard()
     }
+
+    private var units: UnitSystem { profiles.first?.liftingUnits ?? .metric }
+
 
     private var strengthExercises: [ExerciseDefinition] {
         let ids = Set(filteredSessions.flatMap(\.exercises).map(\.exerciseId))
@@ -236,11 +233,12 @@ struct AnalyticsView: View {
     }
 
     private func chart(_ title: String, points: [ChartPoint]) -> some View {
-        VStack(alignment: .leading) {
+        VStack(alignment: .leading, spacing: 8) {
             Text(title).font(.headline)
             if points.isEmpty {
-                Text("No data available")
-                    .foregroundStyle(.secondary)
+                // A one-line hint rather than a tall card saying nothing: an
+                // empty analytics tab was three big boxes of "No data available".
+                EmptyHint(text: "Not enough data yet")
             } else {
                 Chart(points) { point in
                     LineMark(x: .value("Date", point.date), y: .value(title, point.value))

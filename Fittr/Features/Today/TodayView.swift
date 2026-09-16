@@ -11,154 +11,271 @@ struct TodayView: View {
     @Query(sort: \PersonalRecord.achievedAt, order: .reverse) private var records: [PersonalRecord]
 
     @Binding var presentedSession: WorkoutSession?
-    @State private var resumePrompt: WorkoutSession?
-    @State private var weekItems: [ScheduledWorkout] = []
-    @State private var nextItem: ScheduledWorkout?
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 16) {
                     if let resumePrompt {
                         resumeBanner(resumePrompt)
                     }
                     nextWorkoutCard
-                    thisWeekCard
-                    latestProgressCard
-                    consistencyCard
+                    weekCard
+                    progressCard
+                    if let record = records.first {
+                        recordCard(record)
+                    }
                 }
                 .padding(20)
             }
-            .background(FittrTheme.background)
+            .background(FittrTheme.backgroundGradient.ignoresSafeArea())
             .navigationTitle("Today")
-            .onAppear(perform: reload)
+            .onAppear { FittrDependencies.shared.attach(context: modelContext) }
         }
     }
 
+    // MARK: - Derived state
+    //
+    // These read straight from @Query rather than being loaded into @State on
+    // appear. The imperative version raced the first-launch seed: Today rendered
+    // before SeedService finished and then never recomputed, so a fresh install
+    // showed "No upcoming workout" until you switched tabs and came back.
+
+    private var resumePrompt: WorkoutSession? {
+        sessions.first { $0.endedAt == nil }
+    }
+
+    private var weekItems: [ScheduledWorkout] {
+        let start = DateHelpers.isoWeekStart(for: .now)
+        guard let end = Calendar.current.date(byAdding: .day, value: 7, to: start) else { return [] }
+        return scheduled.filter { $0.scheduledStart >= start && $0.scheduledStart < end }
+    }
+
+    private var nextItem: ScheduledWorkout? {
+        let today = DateHelpers.startOfDay(.now)
+        let upcoming = scheduled.filter { $0.status == .upcoming || $0.status == .rescheduled }
+        return upcoming.first { $0.scheduledStart >= today } ?? upcoming.first
+    }
+
+    private var weekSessions: [WorkoutSession] {
+        let weekStart = DateHelpers.isoWeekStart(for: .now)
+        return sessions.filter { DateHelpers.isoWeekStart(for: $0.startedAt) == weekStart }
+    }
+
+    private var weekTrainingSeconds: TimeInterval {
+        weekSessions.reduce(0) { $0 + $1.elapsed() }
+    }
+
+    private var plannedThisWeek: Int {
+        weekItems.filter { $0.template?.type.isTrainable == true && $0.template?.isOptionalDay == false }.count
+    }
+
+    private var completedThisWeek: Int {
+        weekItems.filter { $0.status == .completed }.count
+    }
+
+    private var weekMarks: [WeekDayMark] {
+        let start = DateHelpers.isoWeekStart(for: .now)
+        return ISOWeekday.allCases.map { day in
+            let date = DateHelpers.dateOnISOWeekday(day, weekStart: start, hour: 12, minute: 0)
+            let item = weekItems.first { ISOWeekday.from(date: $0.scheduledStart) == day }
+            return WeekDayMark(
+                id: day.rawValue,
+                letter: String(day.shortTitle.prefix(1)),
+                dayNumber: Calendar.current.component(.day, from: date),
+                state: state(for: item),
+                isToday: DateHelpers.isSameDay(date, .now)
+            )
+        }
+    }
+
+    private func state(for item: ScheduledWorkout?) -> WeekDayMark.State {
+        guard let item else { return .empty }
+        switch item.status {
+        case .completed: return .completed
+        case .skipped: return .skipped
+        case .upcoming, .rescheduled: return item.template?.type == .rest ? .rest : .upcoming
+        }
+    }
+
+    private var adherence: Double {
+        let monthStart = Calendar.current.date(byAdding: .day, value: -30, to: .now) ?? .now
+        let items = scheduled.filter {
+            $0.scheduledStart >= monthStart
+                && $0.scheduledStart <= .now
+                && $0.template?.isOptionalDay == false
+                && $0.template?.type != .rest
+        }
+        let completed = items.filter { $0.status == .completed }.count
+        return WorkoutMath.weeklyAdherence(planned: items.count, completed: completed)
+    }
+
+    // MARK: - Cards
+
     private var nextWorkoutCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("NEXT WORKOUT")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 14) {
             if let item = nextItem, let template = item.template {
+                HStack {
+                    SectionLabel(text: scheduleLine(item), color: FittrTheme.accent)
+                    Spacer()
+                    if template.type.isTrainable {
+                        Text(template.type.title)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
                 Text(template.name)
                     .font(.largeTitle.weight(.bold))
+                    .minimumScaleFactor(0.7)
+                    .lineLimit(2)
                     .accessibilityIdentifier("today.nextName")
-                Text(scheduleLine(item))
-                    .foregroundStyle(.secondary)
-                Text("\(template.orderedExercises.count) exercises · ~\(template.estimatedDurationMinutes) min")
-                    .foregroundStyle(.secondary)
+
                 if template.type.isTrainable {
+                    HStack(spacing: 8) {
+                        StatusChip(text: "\(template.orderedExercises.count) exercises")
+                        StatusChip(text: "~\(template.estimatedDurationMinutes) min")
+                    }
                     Button("Start Workout") {
                         start(template: template, scheduled: item)
                     }
                     .buttonStyle(GymButtonStyle())
                     .accessibilityIdentifier("today.start")
-                    if template.type == .strength {
-                        NavigationLink("Assign music") {
-                            WorkoutMusicSetupView(template: template)
+                    HStack(spacing: 8) {
+                        NavigationLink("View") {
+                            TemplateEditorView(template: template, scheduled: item)
                         }
-                        .buttonStyle(SecondaryGymButtonStyle())
-                    }
-                    HStack {
-                        NavigationLink("View Workout") {
-                            TemplateEditorView(template: template)
+                        .buttonStyle(SecondaryGymButtonStyle(compact: true))
+                        if template.type == .strength {
+                            NavigationLink("Music") {
+                                WorkoutMusicSetupView(template: template)
+                            }
+                            .buttonStyle(SecondaryGymButtonStyle(compact: true))
                         }
-                        .buttonStyle(SecondaryGymButtonStyle())
-                        Button("Reschedule") {
+                        Button("Tomorrow") {
                             if let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: item.scheduledStart) {
                                 try? ScheduleService.reschedule(item, to: tomorrow, in: modelContext)
-                                reload()
                             }
                         }
-                        .buttonStyle(SecondaryGymButtonStyle())
+                        .buttonStyle(SecondaryGymButtonStyle(compact: true))
                     }
                 } else {
-                    Text("No structured session today.")
+                    Text("Nothing structured today. Rest counts as training.")
                         .foregroundStyle(.secondary)
                 }
             } else {
-                Text("No upcoming workout.")
+                SectionLabel(text: "Next workout")
+                Text("No upcoming workout")
                     .font(.title2.weight(.semibold))
+                Text("Add one from the Plan tab.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .fittrCard(nextItem?.template?.type.isTrainable == true ? .hero : .standard)
+    }
+
+    private var weekCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                SectionLabel(text: "This week")
+                Spacer()
+                if plannedThisWeek > 0 {
+                    Text("\(completedThisWeek) of \(plannedThisWeek) done")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            WeekStrip(days: weekMarks)
+            Divider().overlay(FittrTheme.hairline)
+            HStack(spacing: 12) {
+                StatBlock(
+                    value: weekTrainingSeconds > 0
+                        ? DurationFormatting.compact(seconds: weekTrainingSeconds)
+                        : "—",
+                    label: "Training time"
+                )
+                StatBlock(
+                    value: "\(weekSessions.filter { $0.type == .strength }.count)",
+                    label: "Strength"
+                )
+                StatBlock(
+                    value: "\(Int(weekSessions.filter { $0.type == .cardio || $0.type == .swimming }.reduce(0) { $0 + $1.elapsed() } / 60))m",
+                    label: "Cardio"
+                )
             }
         }
         .fittrCard()
     }
 
-    private var thisWeekCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("THIS WEEK")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.secondary)
-            let completed = weekItems.filter { $0.status == .completed }.count
-            let planned = weekItems.filter { $0.template?.type.isTrainable == true && $0.template?.isOptionalDay == false }.count
-            Text("\(completed) / \(max(planned, 1)) sessions completed")
-                .font(.title3.weight(.semibold))
-            let weekStart = DateHelpers.isoWeekStart(for: .now)
-            let weekSessions = sessions.filter { DateHelpers.isoWeekStart(for: $0.startedAt) == weekStart }
-            let trainingTime = weekSessions.reduce(0) { $0 + $1.elapsed() }
-            Text("Training time \(DurationFormatting.compact(seconds: trainingTime))")
-                .foregroundStyle(.secondary)
-            Text("Strength sessions \(weekSessions.filter { $0.type == .strength }.count) · Cardio \(Int(weekSessions.filter { $0.type == .cardio || $0.type == .swimming }.reduce(0) { $0 + $1.elapsed() } / 60)) min")
-                .foregroundStyle(.secondary)
-        }
-        .fittrCard()
-    }
-
-    private var latestProgressCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("LATEST PROGRESS")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.secondary)
-            if let record = records.first {
-                Text("\(record.exerciseName)")
+    private var progressCard: some View {
+        HStack(spacing: 18) {
+            ProgressRing(progress: adherence, size: 72)
+            VStack(alignment: .leading, spacing: 6) {
+                SectionLabel(text: "Adherence")
+                Text("Last 30 days")
                     .font(.headline)
-                Text("\(record.kind.title)")
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("Complete a workout to see progress here.")
-                    .foregroundStyle(.secondary)
+                if let latest = weights.first, let profile = profiles.first {
+                    let delta = latest.weightKg - profile.startingWeightKg
+                    HStack(spacing: 6) {
+                        // Only claim a direction once there is one. At zero
+                        // change an arrow plus "+0.0" reads as a broken stat.
+                        if abs(delta) >= 0.05 {
+                            Image(systemName: delta < 0 ? "arrow.down.right" : "arrow.up.right")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(delta < 0 ? FittrTheme.success : FittrTheme.warning)
+                            Text("Body weight \(NumberFormatting.weight(latest.weightKg, units: .metric)) · \(NumberFormatting.signedWeight(delta, units: .metric))")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .minimumScaleFactor(0.7)
+                                .lineLimit(1)
+                        } else {
+                            Text("Body weight \(NumberFormatting.weight(latest.weightKg, units: .metric))")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
             }
-            if weights.count >= 2 {
-                let latest = weights[0].weightKg
-                let previous = weights[1].weightKg
-                Text("Body weight \(String(format: "%.1f", previous)) → \(String(format: "%.1f", latest)) kg")
-            } else if let latest = weights.first {
-                Text("Body weight \(String(format: "%.1f", latest.weightKg)) kg")
-            }
+            Spacer(minLength: 0)
         }
         .fittrCard()
     }
 
-    private var consistencyCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("CONSISTENCY")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.secondary)
-            let monthStart = Calendar.current.date(byAdding: .day, value: -30, to: .now) ?? .now
-            let monthItems = scheduled.filter { $0.scheduledStart >= monthStart && $0.template?.isOptionalDay == false && $0.template?.type != .rest }
-            let completed = monthItems.filter { $0.status == .completed }.count
-            let percent = WorkoutMath.weeklyAdherence(planned: monthItems.count, completed: completed)
-            Text("\(weekItems.filter { $0.status == .completed }.count) workouts completed this week")
-            Text("\(Int((percent * 100).rounded()))% adherence over last 30 days")
-                .foregroundStyle(.secondary)
+    private func recordCard(_ record: PersonalRecord) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: "trophy.fill")
+                .font(.title2)
+                .foregroundStyle(FittrTheme.warning)
+            VStack(alignment: .leading, spacing: 2) {
+                SectionLabel(text: "Latest record")
+                Text(record.exerciseName)
+                    .font(.headline)
+                Text(record.kind.title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
         }
-        .fittrCard()
+        .fittrCard(.subtle)
     }
 
     private func resumeBanner(_ session: WorkoutSession) -> some View {
         let current = session.orderedExercises.first { $0.status == .active }
             ?? session.orderedExercises.first { $0.status == .pending }
         return VStack(alignment: .leading, spacing: 12) {
-            Text("WORKOUT IN PROGRESS")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(FittrTheme.warning)
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(FittrTheme.warning)
+                    .frame(width: 8, height: 8)
+                SectionLabel(text: "Workout in progress", color: FittrTheme.warning)
+            }
             Text(session.name)
-                .font(.largeTitle.weight(.bold))
+                .font(.title.weight(.bold))
             Text("Started \(session.startedAt.formatted(date: .omitted, time: .shortened))")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
             if let current {
                 Text("Resume at \(current.exerciseName)")
-                    .font(.title3.weight(.semibold))
+                    .font(.headline)
             }
             Button("Resume workout") {
                 presentedSession = session
@@ -168,8 +285,8 @@ struct TodayView: View {
         }
         .fittrCard()
         .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(FittrTheme.warning, lineWidth: 2)
+            RoundedRectangle(cornerRadius: FittrTheme.cardCornerRadius, style: .continuous)
+                .strokeBorder(FittrTheme.warning, lineWidth: 2)
         )
     }
 
@@ -189,23 +306,11 @@ struct TodayView: View {
             presentedSession = inProgress
             return
         }
-        do {
-            let session = try WorkoutSessionFactory.start(
-                template: template,
-                scheduled: scheduled,
-                source: scheduled == nil ? .manual : .scheduled,
-                in: modelContext
-            )
-            presentedSession = session
-        } catch {
-            return
-        }
-    }
-
-    private func reload() {
-        nextItem = try? ScheduleService.nextScheduled(in: modelContext)
-        weekItems = (try? ScheduleService.weekItems(containing: .now, in: modelContext)) ?? []
-        resumePrompt = WorkoutSessionFactory.inProgress(in: modelContext)
-        FittrDependencies.shared.attach(context: modelContext)
+        presentedSession = try? WorkoutSessionFactory.start(
+            template: template,
+            scheduled: scheduled,
+            source: scheduled == nil ? .manual : .scheduled,
+            in: modelContext
+        )
     }
 }

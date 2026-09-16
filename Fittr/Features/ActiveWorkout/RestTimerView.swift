@@ -7,7 +7,7 @@ struct RestTimerView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text(controller.restIsReady ? "READY" : "REST")
                 .font(.caption.weight(.bold))
-                .foregroundStyle(controller.restIsReady ? FittrTheme.success : .secondary)
+                .foregroundStyle(controller.restIsReady ? FittrTheme.success : FittrTheme.restAccent)
             if controller.isRestingBeforeNextExercise, let next = controller.nextExerciseName {
                 Text("Next: \(next)")
                     .font(.title3.weight(.semibold))
@@ -19,10 +19,10 @@ struct RestTimerView: View {
             Text(DurationFormatting.countdown(seconds: controller.remainingRest))
                 .font(.system(size: 56, weight: .bold, design: .rounded))
                 .monospacedDigit()
-                .foregroundStyle(controller.restIsReady ? FittrTheme.success : .primary)
+                .foregroundStyle(controller.restIsReady ? FittrTheme.success : FittrTheme.restAccent)
                 .accessibilityIdentifier("workout.restTimer")
             ProgressView(value: controller.restProgress)
-                .tint(controller.restIsReady ? FittrTheme.success : FittrTheme.accent)
+                .tint(controller.restIsReady ? FittrTheme.success : FittrTheme.restAccent)
             if let rest = controller.openRest {
                 Text("Actual rest so far: \(DurationFormatting.compact(seconds: rest.actualDuration(now: controller.tick)))")
                     .font(.caption)

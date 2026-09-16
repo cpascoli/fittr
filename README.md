@@ -40,7 +40,13 @@ The important path is **Today → Start Workout → Complete Set**. Rest starts 
 ## Tests
 
 ```bash
-xcodebuild -scheme Fittr -destination 'platform=iOS Simulator,name=iPhone 16 Pro' test
+xcodebuild -scheme Fittr -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.2' test
+```
+
+A bare `name=iPhone 16 Pro` does not resolve when several runtimes are installed — pin `OS=`, or use a simulator UDID from `xcrun simctl list devices available`:
+
+```bash
+xcodebuild -scheme Fittr -destination 'id=<UDID>' test
 ```
 
 Unit tests cover volume, timestamps, progression, snapshots, adherence, moving average, export, and in-progress recovery. UI tests walk the core strength flow with `--uitesting`.

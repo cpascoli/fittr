@@ -20,17 +20,22 @@ struct SettingsView: View {
                         }
                         LabeledContent("Age", value: "\(profile.ageYears)")
                         LabeledContent("Height", value: "\(Int(profile.heightCm)) cm")
-                        Picker("Units", selection: Bindable(profile).preferredUnits) {
+                    }
+                    Section("Units") {
+                        Picker("Lifting weights", selection: Bindable(profile).liftingUnits) {
                             ForEach(UnitSystem.allCases) { system in
-                                Text(system.title).tag(system)
+                                Text(system.weightTitle).tag(system)
                             }
                         }
+                        Text("Affects the weights you lift. Body weight stays in kg and distances in km. The set logger shows both units either way.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 if let current = settings.first {
                     Section("Training") {
                         Stepper(
-                            "Weight increment \(NumberFormatting.weight(current.weightIncrementKg, units: profiles.first?.preferredUnits ?? .metric))",
+                            "Weight increment \(NumberFormatting.weight(current.weightIncrementKg, units: profiles.first?.liftingUnits ?? .metric))",
                             value: Bindable(current).weightIncrementKg,
                             in: 0.5...10,
                             step: 0.5

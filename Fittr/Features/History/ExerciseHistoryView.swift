@@ -5,6 +5,10 @@ struct ExerciseHistoryView: View {
     let exercise: ExerciseDefinition
     @Query(sort: \WorkoutSession.startedAt, order: .reverse) private var sessions: [WorkoutSession]
 
+    @Query(sort: \UserProfile.createdAt) private var profiles: [UserProfile]
+
+    private var units: UnitSystem { profiles.first?.liftingUnits ?? .metric }
+
     var body: some View {
         List {
             ForEach(rows, id: \.id) { row in
@@ -14,7 +18,7 @@ struct ExerciseHistoryView: View {
                     Text(row.line)
                         .font(.body.monospacedDigit())
                     if row.volume > 0 {
-                        Text("Volume \(NumberFormatting.volume(row.volume, units: .metric))")
+                        Text("Volume \(NumberFormatting.volume(row.volume, units: units))")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -43,7 +47,7 @@ struct ExerciseHistoryView: View {
 
     private func line(_ set: ExerciseSet) -> String {
         if let weight = set.weightKg, let reps = set.reps {
-            return "Set \(set.setNumber) · \(NumberFormatting.weight(weight, units: .metric)) × \(reps)"
+            return "Set \(set.setNumber) · \(NumberFormatting.weight(weight, units: units)) × \(reps)"
         }
         if let duration = set.durationSeconds {
             return "Set \(set.setNumber) · \(DurationFormatting.compact(seconds: duration))"

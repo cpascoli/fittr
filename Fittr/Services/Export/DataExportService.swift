@@ -119,7 +119,7 @@ enum DataExportService {
                     startingWeightKg: $0.startingWeightKg,
                     currentWeightKg: $0.currentWeightKg,
                     targetWeightKg: $0.targetWeightKg,
-                    preferredUnits: $0.preferredUnits.rawValue
+                    preferredUnits: $0.liftingUnits.rawValue
                 )
             },
             settings: settings.map {

@@ -25,6 +25,7 @@ protocol HealthServicing: AnyObject {
         end: Date,
         existingUUID: String?
     ) async throws -> String?
+    func deleteWorkout(uuid: String) async throws
 }
 
 #if canImport(HealthKit)
@@ -94,6 +95,12 @@ final class HealthService: HealthServicing {
         return try await builder.finishWorkout()?.uuid.uuidString
     }
 
+    func deleteWorkout(uuid: String) async throws {
+        guard isAvailable, let objectUUID = UUID(uuidString: uuid) else { return }
+        let predicate = HKQuery.predicateForObject(with: objectUUID)
+        _ = try await store.deleteObjects(of: HKObjectType.workoutType(), predicate: predicate)
+    }
+
     private func activityType(for type: WorkoutType) -> HKWorkoutActivityType {
         switch type {
         case .strength: .traditionalStrengthTraining
@@ -149,6 +156,7 @@ final class HealthService: HealthServicing {
     func requestAuthorization() async throws {}
     func latestSnapshot(workoutStart: Date?, workoutEnd: Date?) async -> HealthSnapshot { HealthSnapshot() }
     func saveWorkout(sessionID: UUID, type: WorkoutType, start: Date, end: Date, existingUUID: String?) async throws -> String? { existingUUID }
+    func deleteWorkout(uuid: String) async throws {}
 }
 #endif
 
@@ -170,5 +178,9 @@ final class MockHealthService: HealthServicing {
         if let existingUUID { return existingUUID }
         savedWorkouts.append(sessionID)
         return sessionID.uuidString
+    }
+
+    func deleteWorkout(uuid: String) async throws {
+        savedWorkouts.removeAll { $0.uuidString == uuid }
     }
 }

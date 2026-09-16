@@ -3,6 +3,10 @@ import SwiftUI
 
 struct TemplateEditorView: View {
     @Bindable var template: WorkoutTemplate
+    /// The scheduled occurrence this was opened from, when there is one. Carried
+    /// through to the session so the schedule is marked complete and adherence
+    /// counts it; starting a template directly stays `nil` and unscheduled.
+    let scheduled: ScheduledWorkout?
     @Query(sort: \ExerciseDefinition.name) private var library: [ExerciseDefinition]
     @State private var adding = false
     @State private var startedSession: WorkoutSession?
@@ -10,8 +14,9 @@ struct TemplateEditorView: View {
     @State private var preferredTime: Date
     @Environment(\.modelContext) private var modelContext
 
-    init(template: WorkoutTemplate) {
+    init(template: WorkoutTemplate, scheduled: ScheduledWorkout? = nil) {
         self.template = template
+        self.scheduled = scheduled
         let hour = template.preferredHour
         let minute = template.preferredMinute
         _hasPreferredTime = State(initialValue: hour != nil && minute != nil)
@@ -98,8 +103,8 @@ struct TemplateEditorView: View {
                 Button("Start Workout") {
                     startedSession = try? WorkoutSessionFactory.start(
                         template: template,
-                        scheduled: nil,
-                        source: .manual,
+                        scheduled: scheduled,
+                        source: scheduled == nil ? .manual : .scheduled,
                         in: modelContext
                     )
                 }
@@ -109,16 +114,11 @@ struct TemplateEditorView: View {
             }
         }
         .fullScreenCover(item: $startedSession) { session in
-            ActiveWorkoutView(
-                controller: ActiveWorkoutController(
-                    session: session,
-                    modelContext: modelContext,
-                    haptics: FittrDependencies.shared.haptics,
-                    notifications: FittrDependencies.shared.notifications,
-                    music: FittrDependencies.shared.music,
-                    settings: try? modelContext.fetch(FetchDescriptor<AppSettings>()).first,
-                    profile: try? modelContext.fetch(FetchDescriptor<UserProfile>()).first
-                )
+            ActiveWorkoutHost(
+                session: session,
+                settings: try? modelContext.fetch(FetchDescriptor<AppSettings>()).first,
+                profile: try? modelContext.fetch(FetchDescriptor<UserProfile>()).first,
+                modelContext: modelContext
             )
         }
         .sheet(isPresented: $adding) {

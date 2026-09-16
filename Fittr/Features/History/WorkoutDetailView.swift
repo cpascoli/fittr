@@ -5,6 +5,10 @@ struct WorkoutDetailView: View {
     @Bindable var session: WorkoutSession
     @Environment(\.modelContext) private var modelContext
 
+    @Query(sort: \UserProfile.createdAt) private var profiles: [UserProfile]
+
+    private var units: UnitSystem { profiles.first?.liftingUnits ?? .metric }
+
     var body: some View {
         List {
             sessionSection
@@ -31,7 +35,7 @@ struct WorkoutDetailView: View {
             LabeledContent("Duration", value: DurationFormatting.compact(seconds: session.elapsed()))
             LabeledContent("Active", value: DurationFormatting.compact(seconds: session.totalActiveSeconds))
             LabeledContent("Rest", value: DurationFormatting.compact(seconds: session.totalRestSeconds))
-            LabeledContent("Volume", value: NumberFormatting.volume(session.trainingVolumeKg, units: .metric))
+            LabeledContent("Volume", value: NumberFormatting.volume(session.trainingVolumeKg, units: units))
             DatePicker("Started at", selection: $session.startedAt)
             if session.endedAt != nil {
                 DatePicker("Ended at", selection: Binding(
@@ -72,6 +76,9 @@ private struct ExerciseHistorySection: View {
 private struct SetEditRow: View {
     @Bindable var set: ExerciseSet
     let restLine: String
+    @Query(sort: \UserProfile.createdAt) private var profiles: [UserProfile]
+
+    private var units: UnitSystem { profiles.first?.liftingUnits ?? .metric }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -79,7 +86,7 @@ private struct SetEditRow: View {
                 .font(.headline)
             if set.weightKg != nil {
                 Stepper(
-                    "Weight \(NumberFormatting.weight(set.weightKg ?? 0, units: .metric))",
+                    "Weight \(NumberFormatting.weight(set.weightKg ?? 0, units: units))",
                     value: Binding(
                         get: { set.weightKg ?? 0 },
                         set: { set.weightKg = $0 }

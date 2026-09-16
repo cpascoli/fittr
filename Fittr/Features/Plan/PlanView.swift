@@ -13,17 +13,20 @@ struct PlanView: View {
             List {
                 Section("This week") {
                     ForEach(weekRows, id: \.id) { row in
-                        weekRow(row)
+                        weekRowLink(row)
                             .swipeActions {
-                                if let item = row.scheduled, item.status == .upcoming {
-                                    Button("Skip") {
-                                        try? ScheduleService.markSkipped(item, in: modelContext)
-                                        reload()
+                                if let item = row.scheduled {
+                                    if item.status == .upcoming {
+                                        Button("Skip") {
+                                            try? ScheduleService.markSkipped(item, in: modelContext)
+                                            reload()
+                                        }
+                                        .tint(.orange)
                                     }
-                                    .tint(.orange)
+                                    Button("Reschedule") { editing = item }
+                                        .tint(FittrTheme.accent)
                                 }
                             }
-                            .onTapGesture { editing = row.scheduled }
                     }
                 }
                 Section("Templates") {
@@ -108,6 +111,29 @@ struct PlanView: View {
             Spacer()
         }
         .accessibilityIdentifier("plan.day.\(row.weekday.rawValue)")
+    }
+
+    /// Tapping a day opens the workout: the logged session if it already happened,
+    /// otherwise the workout itself, ready to start. Rescheduling is the rarer
+    /// intent and lives on a swipe — it used to own the row tap, where people
+    /// reasonably expect "open this".
+    @ViewBuilder
+    private func weekRowLink(_ row: WeekRow) -> some View {
+        if let session = row.scheduled?.completedSession {
+            NavigationLink {
+                WorkoutDetailView(session: session)
+            } label: {
+                weekRow(row)
+            }
+        } else if let item = row.scheduled, let template = item.template, template.type.isTrainable {
+            NavigationLink {
+                TemplateEditorView(template: template, scheduled: item)
+            } label: {
+                weekRow(row)
+            }
+        } else {
+            weekRow(row)
+        }
     }
 
     private func statusColor(_ status: ScheduledStatus) -> Color {

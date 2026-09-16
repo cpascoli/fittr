@@ -47,6 +47,18 @@ enum NumberFormatting {
         return String(format: "%.1f %@", value, unit)
     }
 
+    /// A change, carrying its sign: "+1.2 kg", "-2.6 lb".
+    static func signedWeight(_ kg: Double, units: UnitSystem) -> String {
+        let value = units == .metric ? kg : UnitConversion.kilogramsToPounds(kg)
+        return String(format: "%+.1f %@", value, UnitConversion.weightUnitLabel(units))
+    }
+
+    /// The same load in the unit the user is *not* currently working in.
+    /// Gym racks are often labelled in the other one.
+    static func alternateWeight(_ kg: Double, units: UnitSystem) -> String {
+        weight(kg, units: units == .metric ? .imperial : .metric)
+    }
+
     static func compactWeight(_ kg: Double, units: UnitSystem) -> String {
         let value = units == .metric ? kg : UnitConversion.kilogramsToPounds(kg)
         if abs(value.rounded() - value) < 0.05 {

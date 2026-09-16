@@ -34,6 +34,15 @@ final class ActiveWorkoutController {
     var restartExerciseTrack = true
     var isMusicPlaying = false
     var tick: Date = .now
+    /// Hold-timer state for duration exercises (plank). Like the rest timer it is
+    /// derived from timestamps rather than counted down in a tick, so backgrounding
+    /// the app mid-hold does not distort the recorded time.
+    private(set) var holdStartedAt: Date?
+    private(set) var holdElapsedBeforePause: TimeInterval = 0
+    private(set) var measuredHoldSeconds: Int?
+    private(set) var holdDidComplete = false
+    private var holdDidFireHaptic = false
+
     private var restActive = false
     private var musicPausedForRest = false
     private var musicStoppedByUser = false
@@ -54,13 +63,18 @@ final class ActiveWorkoutController {
         self.haptics = haptics
         self.notifications = notifications
         self.music = music
-        self.units = profile?.preferredUnits ?? .metric
+        self.units = profile?.liftingUnits ?? .metric
         self.weightIncrementKg = settings?.weightIncrementKg ?? 2
         self.autoPlayExerciseTrack = settings?.autoPlayExerciseTrack ?? true
         self.restartExerciseTrack = settings?.restartExerciseTrack ?? true
         (haptics as? HapticService)?.isEnabled = settings?.hapticsEnabled ?? true
         restoreCurrentExercise()
         prefillFromHistory()
+        if session.endedAt != nil {
+            showingSummary = true
+            isMusicPlaying = music.isPlaying
+            return
+        }
         activateCurrentIfNeeded()
         restActive = openRest != nil
         if restActive {
@@ -177,6 +191,53 @@ final class ActiveWorkoutController {
         prescription?.targetSets ?? 2
     }
 
+    // MARK: - Hold timer
+
+    var isHolding: Bool { holdStartedAt != nil }
+
+    var holdTargetSeconds: Int { max(1, draftDurationSeconds) }
+
+    var holdElapsed: TimeInterval {
+        guard let holdStartedAt else { return holdElapsedBeforePause }
+        return holdElapsedBeforePause + max(0, tick.timeIntervalSince(holdStartedAt))
+    }
+
+    var holdRemaining: TimeInterval {
+        max(0, Double(holdTargetSeconds) - holdElapsed)
+    }
+
+    var holdProgress: Double {
+        min(1, holdElapsed / Double(holdTargetSeconds))
+    }
+
+    /// True once the full target has been held. The set is not logged
+    /// automatically — you still confirm it, because dropping out early is
+    /// normal and the honest number matters more than the convenience.
+    var holdIsFinished: Bool { holdDidComplete }
+
+    func startHold() {
+        guard !isHolding else { return }
+        holdDidComplete = false
+        holdDidFireHaptic = false
+        holdStartedAt = .now
+    }
+
+    /// Stops the hold and keeps whatever was actually held, so a 22-second
+    /// attempt at a 30-second plank is recorded as 22.
+    func stopHold() {
+        holdElapsedBeforePause = holdElapsed
+        holdStartedAt = nil
+        measuredHoldSeconds = Int(holdElapsedBeforePause.rounded())
+    }
+
+    func resetHold() {
+        holdStartedAt = nil
+        holdElapsedBeforePause = 0
+        measuredHoldSeconds = nil
+        holdDidComplete = false
+        holdDidFireHaptic = false
+    }
+
     func pulse() {
         tick = .now
         if isResting && !allowMusicDuringRest && music.isPlaying {
@@ -185,6 +246,12 @@ final class ActiveWorkoutController {
         isMusicPlaying = music.isPlaying
         if restIsReady && !restDidFireHaptic {
             restDidFireHaptic = true
+            haptics.restComplete()
+        }
+        if isHolding, holdRemaining == 0, !holdDidFireHaptic {
+            holdDidFireHaptic = true
+            holdDidComplete = true
+            stopHold()
             haptics.restComplete()
         }
     }
@@ -199,7 +266,7 @@ final class ActiveWorkoutController {
             reps: usesReps && !isUnilateral ? draftReps : (isUnilateral ? draftLeftReps + draftRightReps : nil),
             leftReps: isUnilateral ? draftLeftReps : nil,
             rightReps: isUnilateral ? draftRightReps : nil,
-            durationSeconds: usesDuration ? Double(draftDurationSeconds) : nil,
+            durationSeconds: usesDuration ? Double(measuredHoldSeconds ?? draftDurationSeconds) : nil,
             rpe: draftRPE,
             rir: draftRIR,
             startedAt: exercise.startedAt ?? now,
@@ -211,6 +278,7 @@ final class ActiveWorkoutController {
         )
         exercise.sets.append(set)
         draftNote = ""
+        resetHold()
         persist()
         PlannedLoadService.consume(exerciseId: exercise.exerciseId, in: modelContext)
         haptics.setCompleted()
@@ -333,9 +401,11 @@ final class ActiveWorkoutController {
     func finishWorkout() {
         finishOpenRest()
         notifications.cancelRestComplete()
+        playbackGeneration += 1
         music.pause()
         isMusicPlaying = false
         musicPausedForRest = false
+        allowMusicDuringRest = false
         for exercise in session.orderedExercises where exercise.status == .active || exercise.status == .pending {
             if exercise.completedSets.isEmpty {
                 exercise.status = .skipped
@@ -371,6 +441,7 @@ final class ActiveWorkoutController {
         let items = session.orderedExercises
         if currentExerciseIndex + 1 < items.count {
             currentExerciseIndex += 1
+            resetHold()
             activateCurrentIfNeeded()
             prefillFromHistory()
             playAssignedMusicIfNeeded()
@@ -553,6 +624,7 @@ final class ActiveWorkoutController {
     }
 
     private func playAssignedMusicIfNeeded() {
+        guard session.endedAt == nil, !showingSummary else { return }
         guard autoPlayExerciseTrack, !musicStoppedByUser, let exercise = currentExercise else { return }
         if isResting && !allowMusicDuringRest { return }
         let assignments = (try? modelContext.fetch(FetchDescriptor<MusicAssignment>())) ?? []

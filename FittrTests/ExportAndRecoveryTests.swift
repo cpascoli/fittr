@@ -83,15 +83,19 @@ struct ExportAndRecoveryTests {
         let templates = try context.fetch(FetchDescriptor<WorkoutTemplate>())
         let monday = try #require(templates.first { $0.id == SeedID.mondayStrength })
         let session = try WorkoutSessionFactory.start(template: monday, scheduled: nil, source: .manual, in: context)
-        session.exercises[0].status = .active
-        session.exercises[0].startedAt = Date(timeIntervalSince1970: 100)
-        let set = ExerciseSet(setNumber: 1, weightKg: 10, reps: 10, completedAt: .now, status: .completed, exercise: session.exercises[0])
-        session.exercises[0].sets.append(set)
+        // `exercises` is a relationship, so its order is arbitrary once the store
+        // hands it back. Address the exercise through `orderedExercises` on both
+        // sides of the save.
+        let first = try #require(session.orderedExercises.first)
+        first.status = .active
+        first.startedAt = Date(timeIntervalSince1970: 100)
+        let set = ExerciseSet(setNumber: 1, weightKg: 10, reps: 10, completedAt: .now, status: .completed, exercise: first)
+        first.sets.append(set)
         try context.save()
 
         let reloaded = WorkoutSessionFactory.inProgress(in: context)
         #expect(reloaded?.id == session.id)
-        #expect(reloaded?.exercises.first?.completedSets.count == 1)
+        #expect(reloaded?.orderedExercises.first?.completedSets.count == 1)
         #expect(reloaded?.endedAt == nil)
     }
 }

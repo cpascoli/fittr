@@ -9,11 +9,16 @@ final class UserProfile {
     var startingWeightKg: Double
     var currentWeightKg: Double
     var targetWeightKg: Double
+    /// Units for **lifting loads only** — the weight on the dumbbell, and the
+    /// volume derived from it. Body weight and distances stay metric: the gym's
+    /// rack labelling has nothing to do with how you think about either.
+    ///
+    /// Storage is always kilograms; this only affects display and entry.
     var preferredUnitsRaw: String
     var createdAt: Date
     var updatedAt: Date
 
-    var preferredUnits: UnitSystem {
+    var liftingUnits: UnitSystem {
         get { UnitSystem(rawValue: preferredUnitsRaw) ?? .metric }
         set { preferredUnitsRaw = newValue.rawValue }
     }
@@ -29,7 +34,7 @@ final class UserProfile {
         startingWeightKg: Double,
         currentWeightKg: Double,
         targetWeightKg: Double,
-        preferredUnits: UnitSystem = .metric,
+        liftingUnits: UnitSystem = .metric,
         createdAt: Date = .now,
         updatedAt: Date = .now
     ) {
@@ -39,7 +44,7 @@ final class UserProfile {
         self.startingWeightKg = startingWeightKg
         self.currentWeightKg = currentWeightKg
         self.targetWeightKg = targetWeightKg
-        self.preferredUnitsRaw = preferredUnits.rawValue
+        self.preferredUnitsRaw = liftingUnits.rawValue
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }

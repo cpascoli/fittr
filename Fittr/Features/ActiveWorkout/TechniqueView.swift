@@ -58,16 +58,19 @@ struct TechniqueClipView: View {
         Group {
             if let player {
                 VideoPlayer(player: player)
-                    .frame(maxWidth: .infinity)
+                    .disabled(true)
+                    .frame(minWidth: 0, maxWidth: .infinity)
                     .frame(height: height)
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .disabled(true)
             } else if !frameImages.isEmpty {
-                Image(uiImage: frameImages[frameIndex % frameImages.count])
-                    .resizable()
-                    .scaledToFill()
-                    .frame(maxWidth: .infinity)
+                Color.clear
+                    .frame(minWidth: 0, maxWidth: .infinity)
                     .frame(height: height)
+                    .overlay {
+                        Image(uiImage: frameImages[frameIndex % frameImages.count])
+                            .resizable()
+                            .scaledToFill()
+                    }
                     .clipped()
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             } else {
