@@ -9,12 +9,17 @@ struct RestTimerView: View {
                 .font(.caption.weight(.bold))
                 .foregroundStyle(controller.restIsReady ? FittrTheme.success : FittrTheme.restAccent)
             if controller.isRestingBeforeNextExercise, let next = controller.nextExerciseName {
-                Text("Next: \(next)")
-                    .font(.title3.weight(.semibold))
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityIdentifier("workout.nextExercise")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Next: \(next)")
+                        .font(.title3.weight(.semibold))
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.8)
+                        .accessibilityIdentifier("workout.nextExercise")
+                    if let plan = controller.nextExercisePlan {
+                        loadPlan(plan)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             Text(DurationFormatting.countdown(seconds: controller.remainingRest))
                 .font(.system(size: 56, weight: .bold, design: .rounded))
@@ -30,5 +35,40 @@ struct RestTimerView: View {
             }
         }
         .fittrCard()
+    }
+
+    /// The load belongs here rather than only on the set logger: by the time the
+    /// logger appears the walk to the rack has already happened.
+    @ViewBuilder
+    private func loadPlan(_ plan: NextExercisePlan) -> some View {
+        if let weight = plan.weightKg {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(NumberFormatting.weight(weight, units: controller.units))
+                    .font(.title3.weight(.bold))
+                    .monospacedDigit()
+                Text("= \(NumberFormatting.alternateWeight(weight, units: controller.units))")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                if plan.isPerSide {
+                    Text("each side")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("workout.nextWeight")
+        }
+        if let detail = detailLine(plan) {
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("workout.nextTarget")
+        }
+    }
+
+    private func detailLine(_ plan: NextExercisePlan) -> String? {
+        let parts = [plan.targetLabel, plan.equipmentLabel, plan.basis?.label].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }

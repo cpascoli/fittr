@@ -79,6 +79,7 @@ final class ActiveWorkoutController {
         activateCurrentIfNeeded()
         restActive = openRest != nil
         if restActive {
+            nextExercisePlan = resolveNextExercisePlan()
             pauseMusicForRest()
         } else {
             isMusicPlaying = music.isPlaying
@@ -136,6 +137,46 @@ final class ActiveWorkoutController {
 
     var hasNextExercise: Bool {
         nextExerciseSession != nil
+    }
+
+    /// Resolved when a rest begins, not on demand. Building it decodes a
+    /// snapshot and fetches planned loads and every exercise definition, and
+    /// the rest card re-renders on every tick.
+    private(set) var nextExercisePlan: NextExercisePlan?
+
+    private func resolveNextExercisePlan() -> NextExercisePlan? {
+        guard let next = nextExerciseSession else { return nil }
+        let prescription = next.prescription
+        var load: (weightKg: Double, basis: NextExercisePlan.Basis)?
+        if prescription?.trackingMode.usesWeight ?? false {
+            load = resolveLoad(for: next.exerciseId)
+        }
+        return NextExercisePlan(
+            name: next.exerciseName,
+            targetLabel: prescription?.targetRepLabel,
+            weightKg: load?.weightKg,
+            basis: load?.basis,
+            isPerSide: prescription?.laterality == .unilateral,
+            equipmentLabel: prescription.map(\.equipment).flatMap { $0 == .none ? nil : $0.title }
+        )
+    }
+
+    /// Mirrors what `prefillFromHistory` will put in the logger once the rest
+    /// ends, so the rack trip and the first set agree on a number.
+    private func resolveLoad(for exerciseId: UUID) -> (weightKg: Double, basis: NextExercisePlan.Basis)? {
+        if let planned = PlannedLoadService.weight(for: exerciseId, in: modelContext) {
+            return (planned, .planned)
+        }
+        let previous = previousWorkout?.orderedExercises
+            .first { $0.exerciseId == exerciseId }?
+            .completedSets ?? []
+        if let weight = previous.compactMap(\.weightKg).first {
+            return (weight, .lastTime)
+        }
+        if let starting = startingWeightKg(for: exerciseId) {
+            return (starting, .starting)
+        }
+        return nil
     }
 
     private var nextExerciseSession: ExerciseSession? {
@@ -313,6 +354,7 @@ final class ActiveWorkoutController {
             exercise: exercise
         )
         exercise.rests.append(rest)
+        nextExercisePlan = resolveNextExercisePlan()
         persist()
         notifications.scheduleRestComplete(after: TimeInterval(target))
         pauseMusicForRest()
@@ -456,6 +498,7 @@ final class ActiveWorkoutController {
         let items = session.orderedExercises
         if currentExerciseIndex + 1 < items.count {
             currentExerciseIndex += 1
+            nextExercisePlan = nil
             resetHold()
             activateCurrentIfNeeded()
             prefillFromHistory()
@@ -548,12 +591,16 @@ final class ActiveWorkoutController {
 
     private var startingWeightKg: Double? {
         guard let id = currentExercise?.exerciseId else { return nil }
+        return startingWeightKg(for: id)
+    }
+
+    private func startingWeightKg(for exerciseId: UUID) -> Double? {
         if let stored = (try? modelContext.fetch(FetchDescriptor<ExerciseDefinition>()))?
-            .first(where: { $0.id == id })?
+            .first(where: { $0.id == exerciseId })?
             .defaultWeightKg {
             return stored
         }
-        return ExerciseLibrarySeed.startingWeightKg[id]
+        return ExerciseLibrarySeed.startingWeightKg[exerciseId]
     }
 
     private func beginRestAfterCompletedSet(_ set: ExerciseSet, on exercise: ExerciseSession) {
@@ -730,6 +777,31 @@ final class ActiveWorkoutController {
         case workout
         case exercise
     }
+}
+
+/// What to fetch from the rack before the next exercise starts, captured as
+/// plain values so the rest card can re-render without decoding a snapshot.
+struct NextExercisePlan: Equatable, Sendable {
+    enum Basis: Equatable, Sendable {
+        case planned
+        case lastTime
+        case starting
+
+        var label: String {
+            switch self {
+            case .planned: "Planned"
+            case .lastTime: "Last time"
+            case .starting: "Starting weight"
+            }
+        }
+    }
+
+    var name: String
+    var targetLabel: String?
+    var weightKg: Double?
+    var basis: Basis?
+    var isPerSide: Bool
+    var equipmentLabel: String?
 }
 
 enum WorkoutSessionFactory {

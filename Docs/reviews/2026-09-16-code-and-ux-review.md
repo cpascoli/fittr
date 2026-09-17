@@ -262,6 +262,16 @@ When that item finishes there is nothing behind it, so `systemMusicPlayer` stops
 
 **Scope note.** Rather than restricting playlists to cardio types in the model, allow a playlist on any assignment and simply *default* to the playlist tab for duration-based exercises. Strength exercises benefit too — a 45-minute session currently has the same silence problem between the per-exercise tracks — and a type restriction would be extra logic that buys nothing.
 
+### 3.13 The rest screen names the next exercise but not its load — *fixed*
+
+Resting before the next exercise showed `Next: Dumbbell Romanian Deadlift` and nothing else. The load only appeared in the set logger, which is rendered *after* the rest ends — by which point the walk to the rack has already happened and you are standing at the dumbbells without a number. The rest interval is the one moment the information is actionable.
+
+`ActiveWorkoutController` now exposes a `NextExercisePlan`: name, `targetRepLabel`, equipment, the weight, and the basis for that weight. It deliberately resolves the same way `prefillFromHistory` will when the rest ends — accepted planned load, else the **first** set from the comparable previous session (the weight you load first, not the last one you dropped to), else the definition's starting weight — because a rest card that promises 20 kg and a logger that then says 22.5 kg is worse than showing nothing.
+
+It is a stored property refreshed in `startRest` and on restore, and cleared in `moveToNextExercise`, **not** a computed property. Resolving it fetches planned loads and every exercise definition and decodes a snapshot, and the rest card re-renders on every tick — computing it on demand would have reintroduced §2 exactly.
+
+**Known redundancy.** The technique card below the timer repeats the exercise name. Pre-existing, and left alone: the rest card is the only one guaranteed to be above the fold, so that is where the load has to live.
+
 **Follow-up, same day.** Building the feature was not enough to deliver it: `WorkoutMusicSetupView` — the screen with the auto-play toggle, per-exercise rows and preview — was gated behind `template.type == .strength` in three separate places (the template editor's Music section, Today's Music button, and the Settings list). So from Easy Cardio there was no Music entry point at all, and the only route to a playlist was the per-exercise "Choose local track" button buried in the Exercises section. All three gates now use `type.isTrainable`. Worth remembering as a pattern: a capability added to the model and the service is not reachable until every `== .strength` in the navigation agrees, and those gates were written before cardio had any reason to want music.
 
 ---
