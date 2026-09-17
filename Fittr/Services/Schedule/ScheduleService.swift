@@ -159,7 +159,82 @@ enum ScheduleService {
     static func markCompleted(_ item: ScheduledWorkout, session: WorkoutSession, in context: ModelContext) throws {
         item.status = .completed
         item.completedSession = session
+        refreshCompletion(for: item, in: context)
         try context.save()
+    }
+
+    /// Repairs slots orphaned before deletion learned to re-derive its links: a
+    /// day whose session is still in History but which reads "upcoming".
+    ///
+    /// Deliberately only promotes. Demotion belongs to the delete path, which
+    /// knows exactly which session went away; a launch-time matching rule that is
+    /// merely good enough must never be able to erase a completion the user can
+    /// see. Claimed sessions are excluded so two slots cannot share one workout.
+    static func reconcileCompletions(in context: ModelContext) throws {
+        let all = try context.fetch(FetchDescriptor<ScheduledWorkout>())
+        let orphaned = all.filter { $0.status == .upcoming && $0.completedSession == nil }
+        guard !orphaned.isEmpty else { return }
+
+        var taken = Set(all.compactMap { $0.completedSession?.id })
+        let finished = try context.fetch(FetchDescriptor<WorkoutSession>())
+            .filter { $0.endedAt != nil }
+        guard !finished.isEmpty else { return }
+
+        var changed = false
+        for item in orphaned {
+            let candidates = finished.filter { session in
+                !taken.contains(session.id)
+                    && session.workoutTemplateId == item.template?.id
+                    && DateHelpers.isSameDay(session.startedAt, item.scheduledStart)
+            }
+            guard let best = candidates.max(by: { $0.elapsed() < $1.elapsed() }) else { continue }
+            item.completedSession = best
+            best.scheduled = item
+            item.status = .completed
+            taken.insert(best.id)
+            changed = true
+        }
+        if changed {
+            try context.save()
+        }
+    }
+
+    /// Which finished session satisfied a scheduled slot is derived from the
+    /// sessions that still exist, never left as a stale pointer.
+    ///
+    /// Deleting an accidental second workout used to hand the day back to
+    /// "upcoming" even though the real session was still sitting in History: the
+    /// link was cleared rather than re-derived, and the green tick, the weekly
+    /// count and adherence all read from `status`, not from the sessions.
+    ///
+    /// The longest session wins, so a 39-second misfire never represents a day
+    /// that also holds a real workout — in either direction, whichever of the two
+    /// is deleted.
+    static func refreshCompletion(
+        for item: ScheduledWorkout,
+        in context: ModelContext,
+        excluding excludedSessionID: UUID? = nil
+    ) {
+        let finished = ((try? context.fetch(FetchDescriptor<WorkoutSession>())) ?? [])
+            .filter { $0.endedAt != nil && $0.id != excludedSessionID }
+        let candidates = finished.filter { session in
+            // An explicit link survives a workout done a day late, which day
+            // matching alone would throw away.
+            if let linked = session.scheduled { return linked.id == item.id }
+            return session.workoutTemplateId == item.template?.id
+                && DateHelpers.isSameDay(session.startedAt, item.scheduledStart)
+        }
+
+        guard let best = candidates.max(by: { $0.elapsed() < $1.elapsed() }) else {
+            item.completedSession = nil
+            if item.status == .completed {
+                item.status = .upcoming
+            }
+            return
+        }
+        item.completedSession = best
+        best.scheduled = item
+        item.status = .completed
     }
 
     static func syncUpcomingTimes(for template: WorkoutTemplate, in context: ModelContext) throws {

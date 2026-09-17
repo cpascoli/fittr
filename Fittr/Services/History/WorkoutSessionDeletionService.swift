@@ -35,14 +35,15 @@ enum WorkoutSessionDeletionService {
             .filter { $0.completedSession?.id == sessionID }
         items.append(contentsOf: linked)
 
+        session.scheduled = nil
+
         var seen = Set<UUID>()
         for item in items where seen.insert(item.id).inserted {
             item.completedSession = nil
-            if item.status == .completed {
-                item.status = .upcoming
-            }
+            // Re-derive rather than assume the day is now undone: another
+            // finished session may still satisfy this slot.
+            ScheduleService.refreshCompletion(for: item, in: context, excluding: sessionID)
         }
-        session.scheduled = nil
     }
 
     private static func deleteRecords(for sessionID: UUID, in context: ModelContext) {

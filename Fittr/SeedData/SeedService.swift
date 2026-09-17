@@ -8,6 +8,7 @@ enum SeedService {
         if !existing.isEmpty {
             applyStartingLoads(to: existing, in: context)
             try ScheduleService.ensureUpcomingSchedule(in: context)
+            try ScheduleService.reconcileCompletions(in: context)
             return false
         }
 

@@ -262,6 +262,18 @@ When that item finishes there is nothing behind it, so `systemMusicPlayer` stops
 
 **Scope note.** Rather than restricting playlists to cardio types in the model, allow a playlist on any assignment and simply *default* to the playlist tab for duration-based exercises. Strength exercises benefit too — a 45-minute session currently has the same silence problem between the per-exercise tracks — and a type restriction would be extra logic that buys nothing.
 
+### 3.14 Deleting a duplicate workout un-completes the day — *fixed*
+
+Reported from the field: a real Easy Cardio session on Wed 15 September, then an accidental second start that ran 39 seconds. Deleting the 39-second one from History took the green tick off Wednesday and set the day back to "upcoming", with the real session still sitting in History.
+
+**Why.** `ScheduledWorkout.status` is the sole source of truth for "did I do it" — the tick in `PlanView`, the week strip in `TodayView`, `completedThisWeek` and `adherence` all read it, and none of them cross-check the sessions that exist. Finishing the duplicate called `markCompleted`, which pointed `completedSession` at it, and `WorkoutSessionDeletionService.resetSchedule` then cleared the link and demoted `.completed` → `.upcoming` unconditionally. Nothing asked whether another finished session still satisfied the slot.
+
+**Fix.** `ScheduleService.refreshCompletion` re-derives the link from surviving sessions, and both `markCompleted` and the delete path go through it. Candidates are sessions explicitly linked to the slot, or same template on the same day; the **longest** wins, so a 39-second misfire never represents a day that also holds a real workout — in either direction, whichever of the two is deleted. The explicit-link clause matters: matching on day alone would discard a workout done a day late.
+
+**Repair for data already in this state.** The fix above only helps deletions made from now on, so `reconcileCompletions` runs at launch from `SeedService` and promotes any slot that reads "upcoming" while an unclaimed finished session for that template and day exists. It only ever promotes: demotion stays with the delete path, which knows exactly which session went away, and a launch-time heuristic must never be able to erase a completion the user can see.
+
+Eight tests. The two encoding the report were confirmed to fail against the unfixed code with the exact reported symptom (`status → .upcoming`); the rest are guards against the repair over-reaching.
+
 ### 3.13 The rest screen names the next exercise but not its load — *fixed*
 
 Resting before the next exercise showed `Next: Dumbbell Romanian Deadlift` and nothing else. The load only appeared in the set logger, which is rendered *after* the rest ends — by which point the walk to the rack has already happened and you are standing at the dumbbells without a number. The rest interval is the one moment the information is actionable.
