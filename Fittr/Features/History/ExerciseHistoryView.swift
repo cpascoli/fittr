@@ -29,7 +29,9 @@ struct ExerciseHistoryView: View {
     }
 
     private var rows: [Row] {
-        sessions.flatMap { session in
+        // Finished sessions only, to match History. Sets from a workout still under
+        // way were leaking into the per-exercise log as though they were history.
+        sessions.filter { $0.endedAt != nil }.flatMap { session in
             session.orderedExercises
                 .filter { $0.exerciseId == exercise.id }
                 .flatMap { exerciseSession in

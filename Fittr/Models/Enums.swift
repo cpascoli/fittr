@@ -103,6 +103,19 @@ enum TrackingMode: String, Codable, CaseIterable, Identifiable {
         case .duration, .distanceDuration, .lapsDuration, .freeform: false
         }
     }
+
+    var usesDuration: Bool {
+        switch self {
+        case .duration, .distanceDuration, .lapsDuration: true
+        case .repsWeight, .repsOnly, .freeform: false
+        }
+    }
+
+    /// A hold is counted in seconds, a ride or a swim in minutes. Same field,
+    /// different units, and offering a 2100-second stepper would be absurd.
+    var countsInSeconds: Bool {
+        self == .duration
+    }
 }
 
 enum MuscleGroup: String, Codable, CaseIterable, Identifiable {

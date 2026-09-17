@@ -17,7 +17,7 @@ struct HistoryView: View {
     var body: some View {
         NavigationStack {
             List {
-                if sessions.isEmpty {
+                if finished.isEmpty {
                     EmptyStateView(
                         title: "No workouts yet",
                         systemImage: "figure.strengthtraining.traditional",
@@ -103,8 +103,16 @@ struct HistoryView: View {
         }
     }
 
+    /// History is finished workouts only. An unfinished session used to appear here
+    /// with a duration ticking upward, and swiping it away deleted a workout that
+    /// `RootTabView` still held in `presentedSession` — reading that deleted model
+    /// is a crash. Unfinished work belongs to the resume banner on Today.
+    private var finished: [WorkoutSession] {
+        sessions.filter { $0.endedAt != nil }
+    }
+
     private var filtered: [WorkoutSession] {
-        sessions.filter { session in
+        finished.filter { session in
             if let typeFilter, session.type != typeFilter { return false }
             if !search.isEmpty {
                 return session.exercises.contains { $0.exerciseName.localizedCaseInsensitiveContains(search) }

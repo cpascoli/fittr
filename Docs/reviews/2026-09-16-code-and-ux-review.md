@@ -36,8 +36,8 @@ Roughly: architecture 8/10, gym UX 8/10, correctness 6/10, durability 7/10 (up f
 | `xcodebuild build` | ✅ Builds clean |
 | `xcrun swiftc -typecheck` over `Fittr/*.swift` (iOS 18, Swift 6) | ✅ Clean |
 | Unit tests (`FittrTests`) | ✅ **30 of 30 pass** in 0.14 s |
-| `WorkoutFlowUITests.testCoreStrengthWorkoutFlow` | ❌ Fails after 415 s |
-| `WorkoutFlowUITests.testPlankHoldTimerIsReachableWithoutScrolling` | ❌ Fails after 285 s |
+| `WorkoutFlowUITests.testCoreStrengthWorkoutFlow` | ❌ Fails after 415 s — ✅ **passes in 29 s after the §2 fix** |
+| `WorkoutFlowUITests.testPlankHoldTimerIsReachableWithoutScrolling` | ❌ Fails after 285 s — ✅ **passes in 32 s after the §2 fix** |
 
 The unit suite is genuinely healthy now, including the six new `HoldTimerTests` and three `WorkoutDeletionTests`. Both UI failures share one root cause, covered in §2.
 
@@ -167,7 +167,7 @@ This is an independent path to the same symptom, and it can fire even with `rest
 
 Setting the playback time twice, 80 ms apart, in the hope that one of them sticks, is a sign the design is fighting the framework rather than using it.
 
-### 1.4 Suggested fix
+### 1.4 Suggested fix — **applied 17 September**
 
 Three changes, in order of value:
 
@@ -264,7 +264,7 @@ When that item finishes there is nothing behind it, so `systemMusicPlayer` stops
 
 ---
 
-## 2. The active workout screen never goes idle, and it has now broken the UI tests
+## 2. The active workout screen never goes idle, and it has now broken the UI tests — **fixed 17 September**
 
 Last review flagged `previousWorkout` as a computed property that fetches every session ever recorded, called twice per body evaluation, with the body re-evaluating four times a second. It is unchanged:
 
@@ -376,7 +376,7 @@ So the schedule silently accumulates unreachable duplicates. Each one is counted
 
 A regression test is cheap here and would have caught (b) immediately: seed, reschedule a day onto an occupied one, and assert that both items are still reachable through whatever the Plan tab renders.
 
-### 3.2 P1 — An in-progress workout can be swiped away from History
+### 3.2 P1 — An in-progress workout can be swiped away from History — **fixed 17 September**
 
 `HistoryView` filters only on type and search text, never on `endedAt`:
 
@@ -473,7 +473,7 @@ HealthKit's `requestAuthorization` succeeds when the user taps Deny — by desig
 
 ---
 
-### 3.11 P2 — The exercise library is read-only, so you cannot add an exercise
+### 3.11 P2 — The exercise library is read-only, so you cannot add an exercise — **fixed 17 September**
 
 **Found 17 September, from "can I do treadmill running instead of indoor cycling?"**
 
@@ -483,7 +483,7 @@ You cannot, because the exercise does not exist and there is no way to create it
 
 Both places that add an exercise to a workout — the template editor's "Add exercise" sheet and the live `ReplaceExerciseSheet` — read from the same library, so the gap closes both at once. This wants a "New exercise" button writing an `ExerciseDefinition` with a name, category, equipment, laterality and tracking mode, and it should be reachable from the Add and Replace sheets as well as the library tab, since that is where you are standing when you discover the exercise is missing.
 
-### 3.12 P2 — A cardio or hold target cannot be edited from the template editor
+### 3.12 P2 — A cardio or hold target cannot be edited from the template editor — **fixed 17 September**
 
 `TemplateExerciseEditor` exposes sets, min/max reps, rest and the optional toggle — but never `targetDurationSeconds`:
 
@@ -588,26 +588,25 @@ Still outstanding from last time: the CloudKit path remains blocked by `@Attribu
 - ~~Stop "Tomorrow" from stranding a workout (§3.1).~~ Every item on a day now renders, empty days are tappable to schedule, and the Plan swipe gained "Today", "Undo move" and "Remove". `reschedule` records where the workout came from and no longer overwrites notes; the launch backfill treats a moved workout as occupying its original day too, so the duplicate is never created. Eight regression tests in `ScheduleReschedulingTests`.
 - ~~Let a cardio exercise hold a playlist rather than one track (§1.6).~~ `MusicAssignment` carries a playlist reference with shuffle and repeat, `MusicService` queues the whole collection and tracks queue identity, the picker offers "Play the whole playlist", and skip controls appear during the workout when there is a queue to move through. Four tests in `MusicPlaylistTests`.
 
-**First — the two things that are still actively wrong**
-1. Fix the music queue (§1.4): track-identified resume state, `prepareToPlay` before playback commands, and one `playAssignedMusicIfNeeded()` per advance. Make `nowPlaying` reflect the player, not the request. Note that §1.6 added queue-identity tracking to `MusicService`, which is the hook this wants to build on.
-2. Move the workout clock into a leaf subview and cache `previousWorkout` in `init` (§2). Confirm the UI tests go green again.
+- ~~Fix the music queue (§1.4).~~ A request whose collection differs from what is queued now always goes through `setQueue`, whatever the resume flag says; `prepareToPlay` is awaited before `play()` or `currentPlaybackTime`; `playAssignedMusicIfNeeded()` runs exactly once per advance, `activateCurrentIfNeeded` no longer starting playback; and `nowPlaying` reads the player rather than the request. Three tests in `MusicPlaybackTests`.
+- ~~Stop the active workout screen refreshing four times a second (§2).~~ `previousWorkout` is resolved once in `init`, the clock moved into a `TimelineView` leaf, the tick only runs while a rest or hold is counting, and the per-tick `music.isPlaying` IPC poll is gone. **Both UI tests pass again: 29 s and 32 s, down from 415 s and 285 s.**
+- ~~Filter History to finished sessions (§3.2).~~ `HistoryView` and `ExerciseHistoryView` now show `endedAt != nil` only, and the resume banner gained a Discard action so an abandoned session still has a way out.
+- ~~Let people create an exercise (§3.11) and edit duration targets (§3.12).~~ `NewExerciseSheet` is reachable from the library, the template editor's Add sheet and the live Replace sheet; the template editor gained a duration control, in seconds for holds and minutes for cardio.
 
-**Then — correctness**
-3. Filter History to finished sessions (§3.2).
-4. Add the RIR input (§3.3).
-5. Wire `removeLastSet()` as undo; delete or implement "Add Set" (§3.4).
-6. Fix `HealthService.isAuthorized` (§3.6).
-7. Fix the unilateral reps leak into PRs and Epley (§3.8), and the CSV rest join (§3.7).
-8. Let people create an exercise, from the library and from the Add/Replace sheets (§3.11), and edit duration targets in the template editor (§3.12).
+**First — correctness**
+1. Add the RIR input (§3.3).
+2. Wire `removeLastSet()` as undo; delete or implement "Add Set" (§3.4).
+3. Fix `HealthService.isAuthorized` (§3.6).
+4. Fix the unilateral reps leak into PRs and Epley (§3.8), and the CSV rest join (§3.7).
 
 **Then — honesty of the UI**
-9. Delete or implement the nine dead controls (§4). Schedule the workout reminders, or remove both controls and the service method. `afterTrackBehavior` is now genuinely implementable rather than deletable, since §1.6 gave it a world to mean something in.
-10. Make the plank UI test date-independent; add identifiers to the menu items (§5).
-11. Rename "Save Workout" and persist the check-in on change (§6.2).
+5. Delete or implement the nine dead controls (§4). Schedule the workout reminders, or remove both controls and the service method. `afterTrackBehavior` is now genuinely implementable rather than deletable, since §1.6 gave it a world to mean something in.
+6. Make the plank UI test date-independent; add identifiers to the menu items (§5).
+7. Rename "Save Workout" and persist the check-in on change (§6.2).
 
 **Then — structure**
-12. Extract `WorkoutMusicCoordinator` with an explicit state enum, and switch to `applicationMusicPlayer`.
-13. Automatic periodic JSON backup to Files or iCloud Drive.
+8. Extract `WorkoutMusicCoordinator` with an explicit state enum, and switch to `applicationMusicPlayer`.
+9. Automatic periodic JSON backup to Files or iCloud Drive.
 
 ---
 

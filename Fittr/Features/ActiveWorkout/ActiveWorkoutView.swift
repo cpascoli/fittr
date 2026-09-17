@@ -75,6 +75,7 @@ struct ActiveWorkoutView: View {
             }
             .onAppear {
                 controller.pulse()
+                controller.syncMusicState()
                 syncUnits()
                 setIdleTimerDisabled(true)
             }
@@ -88,6 +89,7 @@ struct ActiveWorkoutView: View {
                 switch phase {
                 case .active:
                     controller.pulse()
+                    controller.syncMusicState()
                     setIdleTimerDisabled(true)
                 case .inactive:
                     break
@@ -97,7 +99,12 @@ struct ActiveWorkoutView: View {
                     break
                 }
             }
+            // Only tick while a rest or hold is actually counting. This used to run
+            // unconditionally and invalidate the whole screen four times a second,
+            // which cost battery and meant the app never reached idle — XCUITest
+            // then needed 63 seconds to resolve a single button.
             .onReceive(Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()) { _ in
+                guard controller.needsTicking else { return }
                 controller.pulse()
             }
         }
@@ -154,9 +161,7 @@ struct ActiveWorkoutView: View {
                 Text(controller.session.name.uppercased())
                     .font(.caption.weight(.bold))
                     .foregroundStyle(.secondary)
-                Text(DurationFormatting.clock(seconds: controller.elapsedWorkout))
-                    .font(.title2.weight(.bold).monospacedDigit())
-                    .accessibilityIdentifier("workout.elapsed")
+                WorkoutClockView(session: controller.session)
             }
             Spacer()
             Text("\(controller.currentExerciseIndex + 1) / \(max(controller.session.orderedExercises.count, 1))")
@@ -461,25 +466,53 @@ struct ActiveWorkoutView: View {
     }
 }
 
+/// The workout clock, ticking on its own rather than through the controller. It
+/// lived in the header and read `controller.tick`, so the second hand redrew the
+/// entire screen — the exercise, the set logger, the music row, everything.
+/// `TimelineView` keeps the invalidation inside these few points of text.
+private struct WorkoutClockView: View {
+    let session: WorkoutSession
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            Text(DurationFormatting.clock(seconds: session.elapsed(now: context.date)))
+                .font(.title2.weight(.bold).monospacedDigit())
+                .accessibilityIdentifier("workout.elapsed")
+        }
+    }
+}
+
 struct ReplaceExerciseSheet: View {
     let exercises: [ExerciseDefinition]
     let onSelect: (ExerciseDefinition) -> Void
 
+    @State private var creating = false
+
     var body: some View {
         NavigationStack {
-            List(exercises.filter(\.isEnabled), id: \.id) { exercise in
-                Button {
-                    onSelect(exercise)
-                } label: {
-                    VStack(alignment: .leading) {
-                        Text(exercise.name)
-                        Text(exercise.category.title)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+            List {
+                // Swapping mid-workout is exactly when you discover the machine
+                // you have moved to is not in the library.
+                Button("Create a new exercise", systemImage: "plus") { creating = true }
+                ForEach(exercises.filter(\.isEnabled), id: \.id) { exercise in
+                    Button {
+                        onSelect(exercise)
+                    } label: {
+                        VStack(alignment: .leading) {
+                            Text(exercise.name)
+                            Text(exercise.category.title)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
             .navigationTitle("Replace exercise")
+            .sheet(isPresented: $creating) {
+                NewExerciseSheet { definition in
+                    onSelect(definition)
+                }
+            }
         }
     }
 }

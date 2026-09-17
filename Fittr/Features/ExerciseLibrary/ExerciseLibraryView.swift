@@ -4,6 +4,7 @@ import SwiftUI
 struct ExerciseLibraryView: View {
     @Query(sort: \ExerciseDefinition.name) private var exercises: [ExerciseDefinition]
     @State private var query = ""
+    @State private var creating = false
 
     var body: some View {
         List {
@@ -22,6 +23,15 @@ struct ExerciseLibraryView: View {
             }
         }
         .navigationTitle("Exercise library")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("New exercise", systemImage: "plus") { creating = true }
+                    .accessibilityIdentifier("library.newExercise")
+            }
+        }
+        .sheet(isPresented: $creating) {
+            NewExerciseSheet { _ in }
+        }
     }
 
     private var filtered: [ExerciseDefinition] {

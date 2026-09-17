@@ -11,6 +11,7 @@ struct TodayView: View {
     @Query(sort: \PersonalRecord.achievedAt, order: .reverse) private var records: [PersonalRecord]
 
     @Binding var presentedSession: WorkoutSession?
+    @State private var sessionPendingDiscard: WorkoutSession?
 
     var body: some View {
         NavigationStack {
@@ -31,6 +32,23 @@ struct TodayView: View {
             .background(FittrTheme.backgroundGradient.ignoresSafeArea())
             .navigationTitle("Today")
             .onAppear { FittrDependencies.shared.attach(context: modelContext) }
+            .confirmationDialog(
+                "Discard this unfinished workout?",
+                isPresented: Binding(
+                    get: { sessionPendingDiscard != nil },
+                    set: { if !$0 { sessionPendingDiscard = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Discard workout", role: .destructive) {
+                    if let session = sessionPendingDiscard {
+                        discard(session)
+                    }
+                    sessionPendingDiscard = nil
+                }
+            } message: {
+                Text("Anything logged so far is thrown away. It was never finished, so nothing reaches your history or records.")
+            }
         }
     }
 
@@ -287,6 +305,14 @@ struct TodayView: View {
             }
             .buttonStyle(GymButtonStyle())
             .accessibilityIdentifier("today.resume")
+            // The only way to get rid of an abandoned session now that History
+            // shows finished workouts only. Worded as discarding rather than
+            // deleting, because nothing was ever recorded.
+            Button("Discard") {
+                sessionPendingDiscard = session
+            }
+            .buttonStyle(SecondaryGymButtonStyle(compact: true))
+            .accessibilityIdentifier("today.discard")
         }
         .fittrCard()
         .overlay(
@@ -304,6 +330,14 @@ struct TodayView: View {
             return "Tomorrow"
         }
         return item.scheduledStart.formatted(date: .abbreviated, time: .omitted)
+    }
+
+    private func discard(_ session: WorkoutSession) {
+        // Drop the binding first: presenting a cover over a deleted model crashes.
+        if presentedSession?.id == session.id {
+            presentedSession = nil
+        }
+        try? WorkoutSessionDeletionService.delete(session, in: modelContext)
     }
 
     private func start(template: WorkoutTemplate, scheduled: ScheduledWorkout?) {

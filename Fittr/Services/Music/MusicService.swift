@@ -129,11 +129,16 @@ final class MusicService: MusicServicing {
             queuedItemIDs = requested
             systemPlayer.shuffleMode = shuffle ? .songs : .off
             systemPlayer.repeatMode = repeatAll ? .all : .none
+            // `setQueue` is asynchronous. Calling `play()` or setting
+            // `currentPlaybackTime` before the queue has actually loaded applies
+            // them to the outgoing queue, which is how a new exercise ended up
+            // restarting the previous exercise's song.
+            await prepareToPlay(systemPlayer)
             systemPlayer.play()
             if restart {
                 systemPlayer.currentPlaybackTime = 0
             }
-            nowPlaying = Self.track(from: systemPlayer.nowPlayingItem ?? items[0])
+            updateNowPlaying(fallback: items[0])
             return
         }
 
@@ -142,7 +147,23 @@ final class MusicService: MusicServicing {
         } else {
             systemPlayer.play()
         }
-        nowPlaying = Self.track(from: systemPlayer.nowPlayingItem ?? items[0])
+        updateNowPlaying(fallback: items[0])
+    }
+
+    private func prepareToPlay(_ player: MPMusicPlayerController) async {
+        await withCheckedContinuation { continuation in
+            player.prepareToPlay { _ in
+                continuation.resume()
+            }
+        }
+    }
+
+    /// Reports what the player says is playing, falling back to the request only
+    /// when it has not caught up yet. Reporting the request as though it were the
+    /// outcome is what hid the queue bug: the UI named the right song throughout.
+    private func updateNowPlaying(fallback: MPMediaItem) {
+        let item = MPMusicPlayerController.systemMusicPlayer.nowPlayingItem ?? fallback
+        nowPlaying = Self.track(from: item)
     }
 
     /// One query for the whole list. Filtering the song library per ID turns a

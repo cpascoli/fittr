@@ -69,6 +69,7 @@ final class ActiveWorkoutController {
         self.restartExerciseTrack = settings?.restartExerciseTrack ?? true
         (haptics as? HapticService)?.isEnabled = settings?.hapticsEnabled ?? true
         restoreCurrentExercise()
+        previousWorkout = resolvePreviousWorkout()
         prefillFromHistory()
         if session.endedAt != nil {
             showingSummary = true
@@ -81,6 +82,7 @@ final class ActiveWorkoutController {
             pauseMusicForRest()
         } else {
             isMusicPlaying = music.isPlaying
+            playAssignedMusicIfNeeded()
         }
     }
 
@@ -172,7 +174,12 @@ final class ActiveWorkoutController {
         return previousWorkout?.orderedExercises.first { $0.exerciseId == current.exerciseId }
     }
 
-    var previousWorkout: WorkoutSession? {
+    /// Resolved once in `init`. Which session this one compares against cannot
+    /// change while it is under way, and computing it fetched every workout ever
+    /// recorded — on every body evaluation, several times a second.
+    private(set) var previousWorkout: WorkoutSession?
+
+    private func resolvePreviousWorkout() -> WorkoutSession? {
         let all = (try? modelContext.fetch(FetchDescriptor<WorkoutSession>())) ?? []
         return AnalyticsEngine.previousComparableSession(
             for: session.workoutTemplateId,
@@ -238,12 +245,20 @@ final class ActiveWorkoutController {
         holdDidFireHaptic = false
     }
 
+    /// Whether anything on screen is counting. When nothing is, there is nothing to
+    /// refresh, and the app can go idle — which the battery appreciates and which
+    /// XCUITest requires before it will do anything at all.
+    var needsTicking: Bool { isResting || isHolding }
+
+    /// Reads the player rather than assuming, so the Play/Pause label survives the
+    /// user reaching for Control Center. Called on events, not on a timer: polling
+    /// `playbackState` is an IPC round trip and it was running four times a second.
+    func syncMusicState() {
+        isMusicPlaying = music.isPlaying
+    }
+
     func pulse() {
         tick = .now
-        if isResting && !allowMusicDuringRest && music.isPlaying {
-            music.pause()
-        }
-        isMusicPlaying = music.isPlaying
         if restIsReady && !restDidFireHaptic {
             restDidFireHaptic = true
             haptics.restComplete()
@@ -450,6 +465,10 @@ final class ActiveWorkoutController {
         }
     }
 
+    /// Marks the exercise started. Deliberately does not touch music: it used to
+    /// start playback too, so advancing an exercise requested the new track twice
+    /// — once here and once from `moveToNextExercise` — and the two requests raced.
+    /// Callers start music themselves, exactly once.
     private func activateCurrentIfNeeded() {
         guard let exercise = currentExercise else { return }
         if exercise.startedAt == nil {
@@ -459,9 +478,6 @@ final class ActiveWorkoutController {
             exercise.status = .active
         }
         persist()
-        if openRest == nil {
-            playAssignedMusicIfNeeded()
-        }
     }
 
     private func restoreCurrentExercise() {
