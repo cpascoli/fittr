@@ -9,8 +9,16 @@ enum ScheduleService {
         let templates = try context.fetch(FetchDescriptor<WorkoutTemplate>())
         guard !templates.isEmpty else { return }
 
+        // A moved workout occupies both the day it is on and the day it came from.
+        // Without the second key, backfilling would refill the vacated slot and the
+        // week would end up holding two copies of the same workout — one of which
+        // the user never asked for and could not see.
         let existing = try context.fetch(FetchDescriptor<ScheduledWorkout>())
-        let existingKeys = Set(existing.map { scheduleKey(templateID: $0.template?.id, date: $0.scheduledStart) })
+        var existingKeys = Set(existing.map { scheduleKey(templateID: $0.template?.id, date: $0.scheduledStart) })
+        for item in existing {
+            guard let origin = item.rescheduledFrom else { continue }
+            existingKeys.insert(scheduleKey(templateID: item.template?.id, date: origin))
+        }
 
         let weekStart = DateHelpers.isoWeekStart(for: now)
         for weekOffset in 0..<horizonWeeks {
@@ -49,7 +57,10 @@ enum ScheduleService {
             ?? upcoming.first
     }
 
-    static func scheduled(on day: Date, in context: ModelContext) throws -> ScheduledWorkout? {
+    /// Every workout on a day, not just the first. A day can legitimately hold
+    /// more than one once anything has been moved onto it, and returning a single
+    /// item here is how a rescheduled workout used to become unreachable.
+    static func items(on day: Date, in context: ModelContext) throws -> [ScheduledWorkout] {
         let start = DateHelpers.startOfDay(day)
         let end = Calendar.current.date(byAdding: .day, value: 1, to: start) ?? day
         let descriptor = FetchDescriptor<ScheduledWorkout>(
@@ -58,7 +69,29 @@ enum ScheduleService {
             },
             sortBy: [SortDescriptor(\.scheduledStart)]
         )
-        return try context.fetch(descriptor).first
+        return try context.fetch(descriptor)
+    }
+
+    @discardableResult
+    static func schedule(
+        template: WorkoutTemplate,
+        on day: Date,
+        in context: ModelContext
+    ) throws -> ScheduledWorkout {
+        let settings = try fetchSettings(in: context)
+        let start = DateHelpers.applying(
+            hour: template.preferredHour ?? settings?.preferredWorkoutHour,
+            minute: template.preferredMinute ?? settings?.preferredWorkoutMinute,
+            to: day
+        )
+        let item = ScheduledWorkout(
+            scheduledStart: start,
+            recurrenceGroupId: SeedID.recurrenceGroup,
+            template: template
+        )
+        context.insert(item)
+        try context.save()
+        return item
     }
 
     static func weekItems(containing date: Date, in context: ModelContext) throws -> [ScheduledWorkout] {
@@ -73,17 +106,53 @@ enum ScheduleService {
         return try context.fetch(descriptor)
     }
 
+    /// Moves a workout, remembering the day it came from so the move can be undone
+    /// exactly. Moving it back onto its original day clears the marker rather than
+    /// leaving it flagged as "rescheduled" forever.
+    ///
+    /// This deliberately does not touch `notes`: it used to overwrite whatever you
+    /// had written there with the literal string "Rescheduled".
     static func reschedule(_ item: ScheduledWorkout, to date: Date, in context: ModelContext) throws {
+        let origin = item.rescheduledFrom ?? item.scheduledStart
         item.scheduledStart = date
-        if item.status == .upcoming || item.status == .rescheduled {
-            item.status = .rescheduled
+
+        if DateHelpers.isSameDay(origin, date) {
+            item.rescheduledFrom = nil
+            if item.status == .rescheduled {
+                item.status = .upcoming
+            }
+        } else {
+            item.rescheduledFrom = origin
+            if item.status == .upcoming || item.status == .rescheduled {
+                item.status = .rescheduled
+            }
         }
-        item.notes = "Rescheduled"
         try context.save()
+    }
+
+    /// Puts a moved workout back where it started. No-op if it was never moved.
+    static func undoReschedule(_ item: ScheduledWorkout, in context: ModelContext) throws {
+        guard let origin = item.rescheduledFrom else { return }
+        try reschedule(item, to: origin, in: context)
+    }
+
+    /// Brings a workout to today, keeping its time of day.
+    static func moveToToday(_ item: ScheduledWorkout, in context: ModelContext, now: Date = .now) throws {
+        let components = Calendar.current.dateComponents([.hour, .minute], from: item.scheduledStart)
+        let target = DateHelpers.applying(hour: components.hour, minute: components.minute, to: now)
+        try reschedule(item, to: target, in: context)
     }
 
     static func markSkipped(_ item: ScheduledWorkout, in context: ModelContext) throws {
         item.status = .skipped
+        try context.save()
+    }
+
+    /// Takes a planned workout off the calendar entirely. Needed as an escape hatch
+    /// for stray entries — a duplicate left behind by a move made before moves were
+    /// tracked, say — which nothing else can clear.
+    static func remove(_ item: ScheduledWorkout, in context: ModelContext) throws {
+        context.delete(item)
         try context.save()
     }
 

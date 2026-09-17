@@ -587,6 +587,29 @@ final class ActiveWorkoutController {
         isMusicPlaying = false
     }
 
+    /// True when the current exercise plays a playlist rather than one song, which
+    /// is the only case where skipping forward has anywhere to go.
+    var hasPlaylistAssigned: Bool {
+        guard let exercise = currentExercise else { return false }
+        let assignments = (try? modelContext.fetch(FetchDescriptor<MusicAssignment>())) ?? []
+        if let match = assignments.first(where: { $0.exerciseId == exercise.exerciseId && $0.scope == .exercise }) {
+            return match.isPlaylist
+        }
+        return assignments.first {
+            $0.template?.id == session.workoutTemplateId && $0.scope == .workout
+        }?.isPlaylist ?? false
+    }
+
+    func nextTrack() {
+        music.next()
+        isMusicPlaying = true
+    }
+
+    func previousTrack() {
+        music.previous()
+        isMusicPlaying = true
+    }
+
     func stopMusic() {
         allowMusicDuringRest = false
         playbackGeneration += 1
@@ -628,21 +651,41 @@ final class ActiveWorkoutController {
         guard autoPlayExerciseTrack, !musicStoppedByUser, let exercise = currentExercise else { return }
         if isResting && !allowMusicDuringRest { return }
         let assignments = (try? modelContext.fetch(FetchDescriptor<MusicAssignment>())) ?? []
+        let assignment: MusicAssignment
         let restart: Bool
-        let itemID: String
         if let match = assignments.first(where: { $0.exerciseId == exercise.exerciseId && $0.scope == .exercise }) {
-            itemID = match.musicItemID
+            assignment = match
             restart = restartExerciseTrack && match.restartFromBeginning
         } else if let workoutMusic = assignments.first(where: { $0.template?.id == session.workoutTemplateId && $0.scope == .workout }) {
-            itemID = workoutMusic.musicItemID
+            assignment = workoutMusic
             restart = false
         } else {
             return
         }
+        let playlistID = assignment.isPlaylist ? assignment.playlistID : nil
+        let itemID = assignment.musicItemID
+        let shuffle = assignment.shufflePlaylist
+        let repeatAll = assignment.repeatPlaylist
         playbackGeneration += 1
         let generation = playbackGeneration
         Task {
-            await music.play(itemID: itemID, restart: restart)
+            if let playlistID {
+                // Resolved at playback time rather than stored, so editing the
+                // playlist in the Music app is picked up without touching Fittr.
+                let tracks = await music.songsInPlaylist(id: playlistID)
+                if tracks.isEmpty {
+                    await music.play(itemID: itemID, restart: restart)
+                } else {
+                    await music.play(
+                        itemIDs: tracks.map(\.id),
+                        restart: restart,
+                        shuffle: shuffle,
+                        repeatAll: repeatAll
+                    )
+                }
+            } else {
+                await music.play(itemID: itemID, restart: restart)
+            }
             guard generation == playbackGeneration else {
                 music.pause()
                 return

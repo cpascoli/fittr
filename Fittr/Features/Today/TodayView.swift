@@ -78,24 +78,29 @@ struct TodayView: View {
         let start = DateHelpers.isoWeekStart(for: .now)
         return ISOWeekday.allCases.map { day in
             let date = DateHelpers.dateOnISOWeekday(day, weekStart: start, hour: 12, minute: 0)
-            let item = weekItems.first { ISOWeekday.from(date: $0.scheduledStart) == day }
+            let items = weekItems.filter { ISOWeekday.from(date: $0.scheduledStart) == day }
             return WeekDayMark(
                 id: day.rawValue,
                 letter: String(day.shortTitle.prefix(1)),
                 dayNumber: Calendar.current.component(.day, from: date),
-                state: state(for: item),
+                state: state(for: items),
                 isToday: DateHelpers.isSameDay(date, .now)
             )
         }
     }
 
-    private func state(for item: ScheduledWorkout?) -> WeekDayMark.State {
-        guard let item else { return .empty }
-        switch item.status {
-        case .completed: return .completed
-        case .skipped: return .skipped
-        case .upcoming, .rescheduled: return item.template?.type == .rest ? .rest : .upcoming
-        }
+    /// A day can hold more than one workout once something has been moved onto it,
+    /// and the strip has one dot per day. Show the most significant thing that
+    /// happened rather than whichever item the fetch happened to return first:
+    /// a day where you trained reads as trained, and a day with anything still to
+    /// do reads as upcoming.
+    private func state(for items: [ScheduledWorkout]) -> WeekDayMark.State {
+        if items.isEmpty { return .empty }
+        if items.contains(where: { $0.status == .completed }) { return .completed }
+        let pending = items.filter { $0.status == .upcoming || $0.status == .rescheduled }
+        if pending.contains(where: { $0.template?.type != .rest }) { return .upcoming }
+        if !pending.isEmpty { return .rest }
+        return .skipped
     }
 
     private var adherence: Double {

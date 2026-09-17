@@ -276,6 +276,17 @@ struct ActiveWorkoutView: View {
                 .buttonStyle(SecondaryGymButtonStyle())
                 .accessibilityIdentifier("workout.music.stop")
             }
+            // Only worth showing when there is a queue to move through.
+            if controller.hasPlaylistAssigned {
+                HStack(spacing: 8) {
+                    Button("Previous") { controller.previousTrack() }
+                        .buttonStyle(SecondaryGymButtonStyle())
+                        .accessibilityIdentifier("workout.music.previous")
+                    Button("Next") { controller.nextTrack() }
+                        .buttonStyle(SecondaryGymButtonStyle())
+                        .accessibilityIdentifier("workout.music.next")
+                }
+            }
             Button("Choose local track") { showingMusicPicker = true }
                 .buttonStyle(SecondaryGymButtonStyle())
         }
@@ -416,14 +427,23 @@ struct ActiveWorkoutView: View {
     }
 
     private var assignedMusicTitle: String {
+        let assignment = assignedMusic
         if let current = music.nowPlaying {
-            return "\(current.artist) — \(current.title)"
+            let line = "\(current.artist) — \(current.title)"
+            // Name the playlist as well as the song, so it is obvious that more is
+            // queued behind this one and skipping will land somewhere.
+            guard let assignment, assignment.isPlaylist else { return line }
+            return "\(assignment.playlistName) · \(line)"
         }
-        if let exerciseID = controller.currentExercise?.exerciseId,
-           let match = assignments.first(where: { $0.exerciseId == exerciseID }) {
-            return "\(match.cachedArtist) — \(match.cachedTitle)"
+        if let assignment {
+            return "\(assignment.cachedArtist) — \(assignment.cachedTitle)"
         }
         return "No assigned track"
+    }
+
+    private var assignedMusic: MusicAssignment? {
+        guard let exerciseID = controller.currentExercise?.exerciseId else { return nil }
+        return assignments.first { $0.exerciseId == exerciseID }
     }
 
     private var music: any MusicServicing {

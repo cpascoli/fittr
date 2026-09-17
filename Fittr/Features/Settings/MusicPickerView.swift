@@ -76,6 +76,7 @@ private extension MusicPickerView {
                     Text("This playlist has no songs Fittr can see on the phone.")
                         .foregroundStyle(.secondary)
                 } else {
+                    playlistButton(selectedPlaylist)
                     ForEach(playlistTracks) { track in
                         trackButton(track)
                     }
@@ -126,6 +127,27 @@ private extension MusicPickerView {
             } else {
                 ForEach(results) { track in
                     trackButton(track)
+                }
+            }
+        }
+    }
+
+    /// Assigning the whole playlist rather than one song from it. A single track
+    /// runs out long before a 35-minute ride does.
+    func playlistButton(_ playlist: MusicPlaylistInfo) -> some View {
+        Button {
+            assign(playlist)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "music.note.list")
+                    .foregroundStyle(FittrTheme.accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Play the whole playlist")
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Text("\(playlistTracks.count) songs, repeating — lasts the session")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
         }
@@ -185,18 +207,42 @@ private extension MusicPickerView {
     }
 
     func assign(_ track: MusicTrackInfo) {
+        insert(
+            MusicAssignment(
+                scope: exerciseId == nil ? .workout : .exercise,
+                musicItemID: track.id,
+                cachedTitle: track.title,
+                cachedArtist: track.artist,
+                source: .localLibrary,
+                template: template,
+                exerciseId: exerciseId
+            )
+        )
+    }
+
+    func assign(_ playlist: MusicPlaylistInfo) {
+        // The first track doubles as the fallback if the playlist is later emptied
+        // or deleted in the Music app, so the assignment still plays something.
+        let first = playlistTracks.first
+        insert(
+            MusicAssignment(
+                scope: exerciseId == nil ? .workout : .exercise,
+                musicItemID: first?.id ?? "",
+                cachedTitle: playlist.name,
+                cachedArtist: "\(playlistTracks.count) songs",
+                source: .localLibrary,
+                playlistID: playlist.id,
+                playlistName: playlist.name,
+                template: template,
+                exerciseId: exerciseId
+            )
+        )
+    }
+
+    func insert(_ assignment: MusicAssignment) {
         for existing in assignments where shouldReplace(existing) {
             modelContext.delete(existing)
         }
-        let assignment = MusicAssignment(
-            scope: exerciseId == nil ? .workout : .exercise,
-            musicItemID: track.id,
-            cachedTitle: track.title,
-            cachedArtist: track.artist,
-            source: .localLibrary,
-            template: template,
-            exerciseId: exerciseId
-        )
         modelContext.insert(assignment)
         try? modelContext.save()
         dismiss()

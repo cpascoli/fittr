@@ -10,6 +10,11 @@ final class ScheduledWorkout {
     var recurrenceGroupId: UUID?
     var notes: String
     var createdAt: Date
+    /// Where this workout sat before it was moved, so a reschedule can be undone
+    /// exactly rather than by guessing "subtract a day". Survives repeated moves:
+    /// after Thu → Fri → Sat this still reads Thursday, which is the day that was
+    /// actually planned. `nil` means the workout is on its original day.
+    var rescheduledFrom: Date?
     var template: WorkoutTemplate?
     var completedSession: WorkoutSession?
 
@@ -26,6 +31,7 @@ final class ScheduledWorkout {
         recurrenceGroupId: UUID? = nil,
         notes: String = "",
         createdAt: Date = .now,
+        rescheduledFrom: Date? = nil,
         template: WorkoutTemplate? = nil,
         completedSession: WorkoutSession? = nil
     ) {
@@ -36,6 +42,7 @@ final class ScheduledWorkout {
         self.recurrenceGroupId = recurrenceGroupId
         self.notes = notes
         self.createdAt = createdAt
+        self.rescheduledFrom = rescheduledFrom
         self.template = template
         self.completedSession = completedSession
     }

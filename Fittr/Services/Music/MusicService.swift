@@ -30,6 +30,9 @@ protocol MusicServicing: AnyObject {
     func localPlaylists() async -> [MusicPlaylistInfo]
     func songsInPlaylist(id: String) async -> [MusicTrackInfo]
     func play(itemID: String, restart: Bool) async
+    /// Queues a whole list so playback outlasts one song. `restart` reloads the
+    /// queue from the top; otherwise an unchanged queue is resumed where it was.
+    func play(itemIDs: [String], restart: Bool, shuffle: Bool, repeatAll: Bool) async
     func preview(itemID: String, seconds: TimeInterval) async
     func playPause()
     func pause()
@@ -45,6 +48,9 @@ final class MusicService: MusicServicing {
     private(set) var nowPlaying: MusicTrackInfo?
     private var pausedAt: TimeInterval?
     private var holdQueue = false
+    /// What Fittr last put in the queue, in order, so a repeat request can tell
+    /// "already playing this" from "needs a new queue".
+    private var queuedItemIDs: [UInt64] = []
 
     var isPlaying: Bool {
         MPMusicPlayerController.systemMusicPlayer.playbackState == .playing
@@ -99,39 +105,57 @@ final class MusicService: MusicServicing {
     }
 
     func play(itemID: String, restart: Bool) async {
-        guard await ensureAuthorized(), let persistentID = UInt64(itemID) else { return }
-        let query = MPMediaQuery.songs()
-        query.addFilterPredicate(
-            MPMediaPropertyPredicate(
-                value: persistentID,
-                forProperty: MPMediaItemPropertyPersistentID
-            )
-        )
-        guard let item = query.items?.first else { return }
+        await play(itemIDs: [itemID], restart: restart, shuffle: false, repeatAll: false)
+    }
+
+    func play(itemIDs: [String], restart: Bool, shuffle: Bool, repeatAll: Bool) async {
+        guard await ensureAuthorized() else { return }
+        let persistentIDs = itemIDs.compactMap(UInt64.init)
+        guard !persistentIDs.isEmpty else { return }
+        let items = Self.mediaItems(for: persistentIDs)
+        guard !items.isEmpty else { return }
+
         let systemPlayer = MPMusicPlayerController.systemMusicPlayer
-        let alreadyQueued = systemPlayer.nowPlayingItem?.persistentID == persistentID
-        if restart {
+        // Queue identity, not just the current song. Asking "is the right track
+        // playing?" cannot distinguish a one-song queue from the same song sitting
+        // inside a playlist, and getting that wrong strands playback after one track.
+        let requested = items.map(\.persistentID)
+        let sameQueue = queuedItemIDs == requested
+
+        if restart || !sameQueue {
             holdQueue = false
             pausedAt = nil
-            systemPlayer.setQueue(with: MPMediaItemCollection(items: [item]))
+            systemPlayer.setQueue(with: MPMediaItemCollection(items: items))
+            queuedItemIDs = requested
+            systemPlayer.shuffleMode = shuffle ? .songs : .off
+            systemPlayer.repeatMode = repeatAll ? .all : .none
             systemPlayer.play()
-            systemPlayer.currentPlaybackTime = 0
-            nowPlaying = Self.track(from: item)
-            return
-        }
-        if holdQueue || alreadyQueued {
-            if holdQueue {
-                resume()
-            } else {
-                systemPlayer.play()
+            if restart {
+                systemPlayer.currentPlaybackTime = 0
             }
-            nowPlaying = Self.track(from: item)
+            nowPlaying = Self.track(from: systemPlayer.nowPlayingItem ?? items[0])
             return
         }
-        pausedAt = nil
-        systemPlayer.setQueue(with: MPMediaItemCollection(items: [item]))
-        systemPlayer.play()
-        nowPlaying = Self.track(from: item)
+
+        if holdQueue {
+            resume()
+        } else {
+            systemPlayer.play()
+        }
+        nowPlaying = Self.track(from: systemPlayer.nowPlayingItem ?? items[0])
+    }
+
+    /// One query for the whole list. Filtering the song library per ID turns a
+    /// 40-track playlist into 40 full-library scans.
+    private static func mediaItems(for persistentIDs: [UInt64]) -> [MPMediaItem] {
+        let wanted = Set(persistentIDs)
+        let byID = Dictionary(
+            (MPMediaQuery.songs().items ?? [])
+                .filter { wanted.contains($0.persistentID) }
+                .map { ($0.persistentID, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        return persistentIDs.compactMap { byID[$0] }
     }
 
     func preview(itemID: String, seconds: TimeInterval) async {
@@ -171,6 +195,7 @@ final class MusicService: MusicServicing {
         let systemPlayer = MPMusicPlayerController.systemMusicPlayer
         holdQueue = false
         pausedAt = nil
+        queuedItemIDs = []
         systemPlayer.stop()
         nowPlaying = nil
     }
@@ -227,6 +252,9 @@ final class MockMusicService: MusicServicing {
     var playlists: [MusicPlaylistInfo] = []
     var playlistSongs: [String: [MusicTrackInfo]] = [:]
     var playedIDs: [String] = []
+    var queuedIDs: [String] = []
+    var didShuffle = false
+    var didRepeat = false
 
     func requestAuthorization() async -> Bool {
         isAuthorized = true
@@ -246,8 +274,16 @@ final class MockMusicService: MusicServicing {
     }
 
     func play(itemID: String, restart: Bool) async {
-        playedIDs.append(itemID)
-        nowPlaying = catalog.first { $0.id == itemID }
+        await play(itemIDs: [itemID], restart: restart, shuffle: false, repeatAll: false)
+    }
+
+    func play(itemIDs: [String], restart: Bool, shuffle: Bool, repeatAll: Bool) async {
+        guard let first = itemIDs.first else { return }
+        playedIDs.append(first)
+        queuedIDs = itemIDs
+        didShuffle = shuffle
+        didRepeat = repeatAll
+        nowPlaying = catalog.first { $0.id == first }
         isPlaying = true
     }
 

@@ -307,8 +307,23 @@ final class MusicAssignment {
     var autoplay: Bool
     var restartFromBeginning: Bool
     var sourceRaw: String
+    /// A whole playlist instead of one song, for sessions long enough that a single
+    /// track leaves you in silence — a 35-minute ride outlasts any one song.
+    ///
+    /// This stores the playlist's persistent ID rather than a snapshot of its track
+    /// IDs, so editing the playlist in the Music app is picked up automatically and
+    /// a song removed from the library cannot leave a dead reference behind. Empty
+    /// means this is an ordinary single-track assignment via `musicItemID`.
+    var playlistID: String = ""
+    var playlistName: String = ""
+    var shufflePlaylist: Bool = false
+    /// Loops the playlist so the music outlasts the session however long it runs.
+    /// This is what actually makes the feature reliable rather than merely longer.
+    var repeatPlaylist: Bool = true
     var template: WorkoutTemplate?
     var exerciseId: UUID?
+
+    var isPlaylist: Bool { !playlistID.isEmpty }
 
     var scope: MusicScope {
         get { MusicScope(rawValue: scopeRaw) ?? .workout }
@@ -330,6 +345,10 @@ final class MusicAssignment {
         autoplay: Bool = true,
         restartFromBeginning: Bool = true,
         source: MusicItemSource = .localLibrary,
+        playlistID: String = "",
+        playlistName: String = "",
+        shufflePlaylist: Bool = false,
+        repeatPlaylist: Bool = true,
         template: WorkoutTemplate? = nil,
         exerciseId: UUID? = nil
     ) {
@@ -342,6 +361,10 @@ final class MusicAssignment {
         self.autoplay = autoplay
         self.restartFromBeginning = restartFromBeginning
         self.sourceRaw = source.rawValue
+        self.playlistID = playlistID
+        self.playlistName = playlistName
+        self.shufflePlaylist = shufflePlaylist
+        self.repeatPlaylist = repeatPlaylist
         self.template = template
         self.exerciseId = exerciseId
     }

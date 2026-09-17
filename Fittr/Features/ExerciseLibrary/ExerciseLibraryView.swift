@@ -76,5 +76,9 @@ private struct MusicAssignmentToggles: View {
         Text("\(assignment.cachedArtist) — \(assignment.cachedTitle)")
         Toggle("Auto start when exercise begins", isOn: $assignment.autoplay)
         Toggle("Restart from beginning", isOn: $assignment.restartFromBeginning)
+        if assignment.isPlaylist {
+            Toggle("Shuffle", isOn: $assignment.shufflePlaylist)
+            Toggle("Repeat playlist", isOn: $assignment.repeatPlaylist)
+        }
     }
 }
