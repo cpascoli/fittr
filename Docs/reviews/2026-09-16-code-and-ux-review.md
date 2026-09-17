@@ -262,6 +262,12 @@ When that item finishes there is nothing behind it, so `systemMusicPlayer` stops
 
 **Scope note.** Rather than restricting playlists to cardio types in the model, allow a playlist on any assignment and simply *default* to the playlist tab for duration-based exercises. Strength exercises benefit too — a 45-minute session currently has the same silence problem between the per-exercise tracks — and a type restriction would be extra logic that buys nothing.
 
+### 3.15 "Tomorrow" removed from the Today card — *done*
+
+§3.1 made the consequences of a stray tap recoverable, but left the trigger in place. It is still a single unconfirmed tap sitting between **View** and **Music** — two harmless navigation buttons — that silently moves tomorrow's workout a day later. Carlo asked for it to go on 17 September, having now hit it twice.
+
+Removed rather than confirmed or given an undo. The action has a home on the Plan tab swipe, which he explicitly asked to keep; a destructive-by-accident shortcut next to two navigation buttons is not worth a confirmation dialog when the real control is one tab away and discoverable.
+
 ### 3.14 Deleting a duplicate workout un-completes the day — *fixed*
 
 Reported from the field: a real Easy Cardio session on Wed 15 September, then an accidental second start that ran 39 seconds. Deleting the 39-second one from History took the green tick off Wednesday and set the day back to "upcoming", with the real session still sitting in History.

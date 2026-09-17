@@ -172,12 +172,6 @@ struct TodayView: View {
                             WorkoutMusicSetupView(template: template)
                         }
                         .buttonStyle(SecondaryGymButtonStyle(compact: true))
-                        Button("Tomorrow") {
-                            if let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: item.scheduledStart) {
-                                try? ScheduleService.reschedule(item, to: tomorrow, in: modelContext)
-                            }
-                        }
-                        .buttonStyle(SecondaryGymButtonStyle(compact: true))
                     }
                 } else {
                     Text("Nothing structured today. Rest counts as training.")
