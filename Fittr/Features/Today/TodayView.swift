@@ -168,12 +168,10 @@ struct TodayView: View {
                             TemplateEditorView(template: template, scheduled: item)
                         }
                         .buttonStyle(SecondaryGymButtonStyle(compact: true))
-                        if template.type == .strength {
-                            NavigationLink("Music") {
-                                WorkoutMusicSetupView(template: template)
-                            }
-                            .buttonStyle(SecondaryGymButtonStyle(compact: true))
+                        NavigationLink("Music") {
+                            WorkoutMusicSetupView(template: template)
                         }
+                        .buttonStyle(SecondaryGymButtonStyle(compact: true))
                         Button("Tomorrow") {
                             if let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: item.scheduledStart) {
                                 try? ScheduleService.reschedule(item, to: tomorrow, in: modelContext)

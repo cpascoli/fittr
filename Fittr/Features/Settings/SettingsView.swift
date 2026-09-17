@@ -89,7 +89,7 @@ struct SettingsView: View {
                         Button("Allow Music library access") {
                             Task { await connectMusic() }
                         }
-                        ForEach(templates.filter { $0.type == .strength }, id: \.id) { template in
+                        ForEach(templates.filter { $0.type.isTrainable }, id: \.id) { template in
                             NavigationLink("Tracks for \(template.weekday.shortTitle) \(template.name)") {
                                 WorkoutMusicSetupView(template: template)
                             }

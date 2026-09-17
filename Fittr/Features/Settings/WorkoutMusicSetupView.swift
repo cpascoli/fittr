@@ -14,7 +14,7 @@ struct WorkoutMusicSetupView: View {
             if let current = settings.first {
                 Section {
                     Toggle("Auto-play when an exercise starts", isOn: Bindable(current).autoPlayExerciseTrack)
-                    Text("Uses songs already on this iPhone. Preview plays about 5 seconds.")
+                    Text("Uses music already on this iPhone. Assign one track, or a whole playlist for a long session — a playlist repeats, so it outlasts the workout. Preview plays about 5 seconds.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -42,16 +42,16 @@ struct WorkoutMusicSetupView: View {
             Text(exercise.name)
                 .font(.headline)
             if let assignment {
-                Text("\(assignment.cachedArtist) — \(assignment.cachedTitle)")
+                Text(description(of: assignment))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
-                Text("No track")
+                Text("No music")
                     .font(.subheadline)
                     .foregroundStyle(.tertiary)
             }
             HStack {
-                Button(assignment == nil ? "Choose track" : "Change") {
+                Button(assignment == nil ? "Choose music" : "Change") {
                     pickingExerciseId = exercise.id
                     showingPicker = true
                 }
@@ -66,6 +66,16 @@ struct WorkoutMusicSetupView: View {
             }
         }
         .padding(.vertical, 6)
+    }
+
+    /// A playlist is named as one, rather than reading "3 songs — Ride playlist"
+    /// from fields meant to hold an artist and a title.
+    private func description(of assignment: MusicAssignment) -> String {
+        guard assignment.isPlaylist else {
+            return "\(assignment.cachedArtist) — \(assignment.cachedTitle)"
+        }
+        let mode = assignment.repeatPlaylist ? "repeating" : "once through"
+        return "Playlist: \(assignment.playlistName) · \(mode)"
     }
 
     private func preview(_ itemID: String) async {

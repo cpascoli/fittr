@@ -67,7 +67,9 @@ struct TemplateEditorView: View {
                 }
                 TextField("Notes", text: $template.notes, axis: .vertical)
             }
-            if template.type == .strength {
+            // Any workout you actually do, not just strength. A 35-minute ride is
+            // the session that needs music most, and it had no way in here.
+            if template.type.isTrainable {
                 Section("Music") {
                     NavigationLink("Assign local tracks") {
                         WorkoutMusicSetupView(template: template)

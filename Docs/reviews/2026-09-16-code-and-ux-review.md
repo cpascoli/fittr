@@ -262,6 +262,8 @@ When that item finishes there is nothing behind it, so `systemMusicPlayer` stops
 
 **Scope note.** Rather than restricting playlists to cardio types in the model, allow a playlist on any assignment and simply *default* to the playlist tab for duration-based exercises. Strength exercises benefit too — a 45-minute session currently has the same silence problem between the per-exercise tracks — and a type restriction would be extra logic that buys nothing.
 
+**Follow-up, same day.** Building the feature was not enough to deliver it: `WorkoutMusicSetupView` — the screen with the auto-play toggle, per-exercise rows and preview — was gated behind `template.type == .strength` in three separate places (the template editor's Music section, Today's Music button, and the Settings list). So from Easy Cardio there was no Music entry point at all, and the only route to a playlist was the per-exercise "Choose local track" button buried in the Exercises section. All three gates now use `type.isTrainable`. Worth remembering as a pattern: a capability added to the model and the service is not reachable until every `== .strength` in the navigation agrees, and those gates were written before cardio had any reason to want music.
+
 ---
 
 ## 2. The active workout screen never goes idle, and it has now broken the UI tests — **fixed 17 September**
