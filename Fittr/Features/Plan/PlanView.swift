@@ -109,8 +109,14 @@ struct PlanView: View {
                 .tint(FittrTheme.accent)
             if item.completedSession == nil {
                 Button("Remove", role: .destructive) {
-                    try? ScheduleService.remove(item, in: modelContext)
-                    reload()
+                    Task {
+                        // The event identifier is the only handle on the calendar
+                        // entry and it goes with the row, so clear the event first
+                        // or it is orphaned for good.
+                        await CalendarSyncService.removeEvent(for: item, in: modelContext)
+                        try? ScheduleService.remove(item, in: modelContext)
+                        reload()
+                    }
                 }
             }
         }
@@ -223,6 +229,10 @@ struct PlanView: View {
 
     private func reload() {
         weekItems = (try? ScheduleService.weekItems(containing: .now, in: modelContext)) ?? []
+        // Every mutation on this screen routes through here, so the calendar
+        // follows moves, skips and new days without each action remembering to.
+        // No-ops unless Calendar sync is on.
+        Task { await CalendarSyncService.reconcile(in: modelContext) }
     }
 }
 

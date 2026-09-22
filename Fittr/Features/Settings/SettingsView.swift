@@ -71,8 +71,23 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Toggle("Add workouts to Calendar", isOn: Bindable(current).calendarSyncEnabled)
-                        Button("Connect Calendar") {
-                            Task { await connectCalendar(current) }
+                            .onChange(of: current.calendarSyncEnabled) { _, enabled in
+                                Task {
+                                    if enabled {
+                                        await connectCalendar(current)
+                                    } else {
+                                        // Turning it off should take the events with
+                                        // it, not leave the calendar littered.
+                                        let removed = await CalendarSyncService.removeAllEvents(in: modelContext)
+                                        calendarStatus = "Removed \(removed) workout event\(removed == 1 ? "" : "s")"
+                                    }
+                                }
+                            }
+                        Button("Remove all Fittr events") {
+                            Task {
+                                let removed = await CalendarSyncService.removeAllEvents(in: modelContext)
+                                calendarStatus = "Removed \(removed) workout event\(removed == 1 ? "" : "s")"
+                            }
                         }
                         Text(calendarStatus).font(.caption).foregroundStyle(.secondary)
                     }
@@ -130,11 +145,13 @@ struct SettingsView: View {
     }
 
     private func connectCalendar(_ current: AppSettings) async {
-        let granted = await FittrDependencies.shared.calendar.requestWriteAccess()
-        calendarStatus = granted ? "Write access granted" : "Permission not granted"
+        let granted = await FittrDependencies.shared.calendar.requestAccess()
+        calendarStatus = granted ? "Connected" : "Permission not granted"
         if granted {
             current.calendarSyncEnabled = true
-            await syncUpcoming(current)
+            await CalendarSyncService.reconcile(in: modelContext)
+        } else {
+            current.calendarSyncEnabled = false
         }
     }
 
@@ -143,24 +160,6 @@ struct SettingsView: View {
         musicStatus = granted ? "Local Music library available" : "Permission not granted"
     }
 
-    private func syncUpcoming(_ current: AppSettings) async {
-        guard current.calendarSyncEnabled else { return }
-        let upcoming = (try? modelContext.fetch(FetchDescriptor<ScheduledWorkout>())) ?? []
-        for item in upcoming where item.status == .upcoming {
-            guard let template = item.template else { continue }
-            if let identifier = try? await FittrDependencies.shared.calendar.upsertWorkoutEvent(
-                identifier: item.calendarEventIdentifier.isEmpty ? nil : item.calendarEventIdentifier,
-                title: template.name,
-                start: item.scheduledStart,
-                durationMinutes: template.estimatedDurationMinutes,
-                notes: "Expected duration: \(template.estimatedDurationMinutes) min\n\(template.orderedExercises.map { $0.exercise?.name ?? "" }.joined(separator: ", "))",
-                deepLink: URL(string: "fittr://workout/\(item.id.uuidString)")
-            ) {
-                item.calendarEventIdentifier = identifier
-            }
-        }
-        try? modelContext.save()
-    }
 }
 
 /// Its own view so the toggle and picker can hold state initialised from the

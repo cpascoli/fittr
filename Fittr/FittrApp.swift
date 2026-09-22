@@ -57,6 +57,7 @@ struct ContentView: View {
                 settings.hasCompletedOnboarding = true
                 try? modelContext.save()
             }
+            await CalendarSyncService.reconcile(in: modelContext)
         }
     }
 }

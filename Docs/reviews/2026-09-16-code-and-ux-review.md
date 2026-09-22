@@ -262,6 +262,28 @@ When that item finishes there is nothing behind it, so `systemMusicPlayer` stops
 
 **Scope note.** Rather than restricting playlists to cardio types in the model, allow a playlist on any assignment and simply *default* to the playlist tab for duration-based exercises. Strength exercises benefit too — a 45-minute session currently has the same silence problem between the per-exercise tracks — and a type restriction would be extra logic that buys nothing.
 
+### 3.17 Duplicated workout events in Apple Calendar — *fixed*
+
+Reported from the field. Carlo asked whether old events could be removed when a future workout is rescheduled. Rescheduling turned out not to be the cause — it never touched the calendar at all.
+
+**What was actually wrong.** Three faults, compounding:
+
+1. **The "update the existing event" branch could never match.** `upsertWorkoutEvent` finds the previous event with `store.event(withIdentifier:)` — a *read* — while the app asked for **write-only** access via `requestWriteOnlyAccessToEvents`. A write-only store cannot read an event back, so every sync fell through to the `EKEvent(eventStore:)` branch and wrote a fresh copy of every upcoming workout. Pressing **Connect Calendar** twice produced two complete sets. This is the duplicate factory, and `Docs/EventKit.md` documented the opposite ("Fittr updates the same event instead of creating duplicates").
+2. **Nothing but that one button ever wrote to the calendar.** Rescheduling, skipping, removing and completing a workout all left it untouched, so the calendar was stale until the button happened to be pressed again.
+3. **`removeEvent` was never called from anywhere in the app.** Dead code. A day taken off the plan kept its event for good, and the launch backfill then recreated that day as a new row with an empty identifier — which the next sync turned into a second event on the same day.
+
+**Fix.** Full calendar access, so an event can be found, moved and deleted. A new `CalendarSyncService` owns the mirroring: `reconcile` walks the schedule and is safe to run repeatedly, `removeEvent(for:)` runs *before* a row is deleted (the identifier is the only handle and it goes with the row), and `removeAllEvents` clears Fittr's events including copies it has lost track of, matched on the `fittr://` deep link rather than stored identifiers. It is driven from launch, from every mutation in `PlanView`, and from Settings. Rest days no longer get events at all — a rest day is not an appointment.
+
+The Settings toggle was also a dead control: it only did anything if you separately pressed Connect. It now connects or, when switched off, removes the events it created. A **Remove all Fittr events** button covers the copies already in the calendar.
+
+Seven tests. `MockCalendarService` was rewritten to mirror EventKit's identity rules — an identifier absent from the store cannot be updated — because the old mock reused whatever identifier it was handed and would have passed against the broken code. Confirmed by mutation: dropping the identifier write takes the second sync from 47 events to 94, which is the reported symptom.
+
+### 3.18 A UI test that only passed on Mondays and Thursdays — *fixed*
+
+`testPlankHoldTimerIsReachableWithoutScrolling` started the workout through `today.start` and then skipped six exercises to reach the plank. The plank only exists in the strength template, so on any other day it opened that day's workout and skipped past the end of it — on Tuesday, Easy Cardio's single Indoor Cycling entry. It now starts from the Plan tab's Full Body Strength template, like the core flow test.
+
+`testCoreStrengthWorkoutFlow` also read `workout.exerciseName` immediately after waiting for the element to exist, which is not the same as waiting for the new workout's first exercise to be laid into it. It failed only when the full suite ran. It now waits on the label's value.
+
 ### 3.16 The app-wide start time could not be changed after onboarding — *fixed*
 
 Carlo asked where to change the usual start time for all workouts. The answer was nowhere. `AppSettings.preferredWorkoutHour/Minute` is written in exactly one place — `OnboardingView`, on first launch — and `SettingsView` had no control for it. None of the seeded templates set `preferredHour`, so every one of them falls back to that value: the setting governing all of their times was the one the user could no longer reach. A per-workout override exists in the template editor, but overriding seven workouts one at a time is not the same thing.

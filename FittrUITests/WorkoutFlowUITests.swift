@@ -24,7 +24,14 @@ final class WorkoutFlowUITests: XCTestCase {
 
         let exercise = app.staticTexts["workout.exerciseName"]
         XCTAssertTrue(exercise.waitForExistence(timeout: 5))
-        XCTAssertTrue(exercise.label.contains("Goblet Squat"))
+        // Wait for the name rather than sampling it once: the element exists
+        // before the new workout's first exercise has been laid into it, and
+        // reading it immediately made this fail only when the whole suite ran.
+        let named = expectation(
+            for: NSPredicate(format: "label CONTAINS %@", "Goblet Squat"),
+            evaluatedWith: exercise
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [named], timeout: 8), .completed)
 
         let complete = app.buttons["workout.completeSet"]
         XCTAssertTrue(complete.waitForExistence(timeout: 3))
@@ -66,8 +73,22 @@ final class WorkoutFlowUITests: XCTestCase {
         app.launchArguments = ["--uitesting", "--reset-store"]
         app.launch()
 
-        XCTAssertTrue(app.buttons["today.start"].waitForExistence(timeout: 10))
-        app.buttons["today.start"].tap()
+        // Started from the template rather than `today.start`: the plank only
+        // exists in the strength workout, so going through Today made this pass
+        // on Mondays and Thursdays and fail every other day — on Tuesday it
+        // opened Easy Cardio and skipped straight past the end of the workout.
+        let planTab = app.tabBars.buttons["Plan"]
+        XCTAssertTrue(planTab.waitForExistence(timeout: 10))
+        planTab.tap()
+
+        let template = app.staticTexts["Full Body Strength"].firstMatch
+        XCTAssertTrue(template.waitForExistence(timeout: 6))
+        template.tap()
+
+        let start = app.buttons["template.start"]
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        start.tap()
+
         XCTAssertTrue(app.staticTexts["workout.exerciseName"].waitForExistence(timeout: 6))
 
         // Skip the six weighted exercises to reach the plank.
@@ -76,11 +97,11 @@ final class WorkoutFlowUITests: XCTestCase {
             app.buttons["Skip exercise"].tap()
         }
 
-        let start = app.buttons["workout.startHold"]
-        XCTAssertTrue(start.waitForExistence(timeout: 5))
-        XCTAssertTrue(start.isHittable, "START HOLD must be on screen without scrolling")
+        let startHold = app.buttons["workout.startHold"]
+        XCTAssertTrue(startHold.waitForExistence(timeout: 5))
+        XCTAssertTrue(startHold.isHittable, "START HOLD must be on screen without scrolling")
 
-        start.tap()
+        startHold.tap()
         XCTAssertTrue(app.buttons["workout.stopHold"].waitForExistence(timeout: 3))
     }
 
