@@ -43,6 +43,7 @@ struct SettingsView: View {
                         Toggle("Haptics", isOn: Bindable(current).hapticsEnabled)
                         Toggle("Rest timer sound / notification", isOn: Bindable(current).restRemindersEnabled)
                         Stepper("Default pool length \(Int(current.defaultPoolLengthMeters)) m", value: Bindable(current).defaultPoolLengthMeters, in: 15...50, step: 5)
+                        DefaultStartTimeRows(settings: current)
                     }
                     Section("Notifications") {
                         Toggle("Workout reminders", isOn: Bindable(current).workoutRemindersEnabled)
@@ -159,5 +160,58 @@ struct SettingsView: View {
             }
         }
         try? modelContext.save()
+    }
+}
+
+/// Its own view so the toggle and picker can hold state initialised from the
+/// stored setting, which a row written inline in `SettingsView` cannot do.
+///
+/// Until now this value was written once during onboarding and never again,
+/// while every seeded workout falls back to it — so the setting driving all of
+/// their times was the one the user could no longer reach.
+private struct DefaultStartTimeRows: View {
+    @Environment(\.modelContext) private var modelContext
+    @Bindable var settings: AppSettings
+    @State private var hasPreferredTime: Bool
+    @State private var preferredTime: Date
+
+    init(settings: AppSettings) {
+        self.settings = settings
+        let hour = settings.preferredWorkoutHour
+        let minute = settings.preferredWorkoutMinute
+        _hasPreferredTime = State(initialValue: hour != nil && minute != nil)
+        _preferredTime = State(initialValue: DateHelpers.applying(hour: hour, minute: minute, to: .now))
+    }
+
+    var body: some View {
+        Toggle("Usual start time", isOn: $hasPreferredTime)
+            .onChange(of: hasPreferredTime) { _, enabled in
+                if enabled {
+                    apply()
+                } else {
+                    settings.preferredWorkoutHour = nil
+                    settings.preferredWorkoutMinute = nil
+                    sync()
+                }
+            }
+        if hasPreferredTime {
+            DatePicker("Time", selection: $preferredTime, displayedComponents: .hourAndMinute)
+                .onChange(of: preferredTime) { _, _ in apply() }
+        }
+        Text("Used by every workout that has no time of its own. Changing it also moves the workouts already scheduled.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+
+    private func apply() {
+        let components = Calendar.current.dateComponents([.hour, .minute], from: preferredTime)
+        settings.preferredWorkoutHour = components.hour
+        settings.preferredWorkoutMinute = components.minute
+        sync()
+    }
+
+    private func sync() {
+        settings.updatedAt = .now
+        try? ScheduleService.syncUpcomingTimesToDefault(in: modelContext)
     }
 }

@@ -262,6 +262,14 @@ When that item finishes there is nothing behind it, so `systemMusicPlayer` stops
 
 **Scope note.** Rather than restricting playlists to cardio types in the model, allow a playlist on any assignment and simply *default* to the playlist tab for duration-based exercises. Strength exercises benefit too — a 45-minute session currently has the same silence problem between the per-exercise tracks — and a type restriction would be extra logic that buys nothing.
 
+### 3.16 The app-wide start time could not be changed after onboarding — *fixed*
+
+Carlo asked where to change the usual start time for all workouts. The answer was nowhere. `AppSettings.preferredWorkoutHour/Minute` is written in exactly one place — `OnboardingView`, on first launch — and `SettingsView` had no control for it. None of the seeded templates set `preferredHour`, so every one of them falls back to that value: the setting governing all of their times was the one the user could no longer reach. A per-workout override exists in the template editor, but overriding seven workouts one at a time is not the same thing.
+
+Added to **Settings → Training**, mirroring the template editor's toggle-plus-picker.
+
+The part that needed a decision is that the default is only read when a scheduled entry is *created*, so changing it would otherwise leave the eight weeks already on the calendar untouched. `syncUpcomingTimesToDefault` re-times upcoming entries whose template has no time of its own; an override is kept, and completed days are left where they are rather than rewriting history. Five tests, including that the day does not drift when only the time changes.
+
 ### 3.15 "Tomorrow" removed from the Today card — *done*
 
 §3.1 made the consequences of a stray tap recoverable, but left the trigger in place. It is still a single unconfirmed tap sitting between **View** and **Music** — two harmless navigation buttons — that silently moves tomorrow's workout a day later. Carlo asked for it to go on 17 September, having now hit it twice.

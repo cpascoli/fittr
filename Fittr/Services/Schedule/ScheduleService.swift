@@ -237,6 +237,29 @@ enum ScheduleService {
         item.status = .completed
     }
 
+    /// Re-times upcoming workouts that follow the app-wide default.
+    ///
+    /// A workout carrying its own preferred time keeps it: that setting is an
+    /// override, and changing the global default must not silently discard it.
+    /// Without this the default would only reach entries created afterwards,
+    /// leaving the next eight weeks on the old time.
+    static func syncUpcomingTimesToDefault(in context: ModelContext) throws {
+        let settings = try fetchSettings(in: context)
+        let upcoming = try context.fetch(
+            FetchDescriptor<ScheduledWorkout>(
+                predicate: #Predicate { $0.statusRaw == "upcoming" }
+            )
+        )
+        for item in upcoming where item.template?.preferredHour == nil {
+            item.scheduledStart = DateHelpers.applying(
+                hour: settings?.preferredWorkoutHour,
+                minute: settings?.preferredWorkoutMinute,
+                to: item.scheduledStart
+            )
+        }
+        try context.save()
+    }
+
     static func syncUpcomingTimes(for template: WorkoutTemplate, in context: ModelContext) throws {
         let settings = try fetchSettings(in: context)
         let hour = template.preferredHour ?? settings?.preferredWorkoutHour
