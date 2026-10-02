@@ -59,12 +59,26 @@ struct RestTimerView: View {
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("workout.nextWeight")
         }
+        if let reps = repsLine(plan) {
+            Text(reps)
+                .font(.headline)
+                .monospacedDigit()
+                .accessibilityIdentifier("workout.nextReps")
+        }
         if let detail = detailLine(plan) {
             Text(detail)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .accessibilityIdentifier("workout.nextTarget")
         }
+    }
+
+    private func repsLine(_ plan: NextExercisePlan) -> String? {
+        guard let reps = plan.reps else { return nil }
+        if plan.isPerSide, let right = plan.rightReps, right != reps {
+            return "\(reps) left · \(right) right reps"
+        }
+        return plan.isPerSide ? "\(reps) reps each side" : "\(reps) reps"
     }
 
     private func detailLine(_ plan: NextExercisePlan) -> String? {

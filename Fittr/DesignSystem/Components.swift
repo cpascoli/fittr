@@ -1,3 +1,4 @@
+import Charts
 import SwiftUI
 
 struct StepperControl: View {
@@ -246,6 +247,40 @@ struct StatBlock: View {
     }
 }
 
+
+/// A small strength curve for a card. Axes stay hidden so the shape is the point;
+/// the number next to it says what the shape is worth.
+struct StrengthSparkline: View {
+    let points: [DatedValue]
+
+    var body: some View {
+        Chart(points) { point in
+            AreaMark(
+                x: .value("Week", point.date),
+                y: .value("Load", point.value)
+            )
+            .foregroundStyle(
+                LinearGradient(
+                    colors: [FittrTheme.accent.opacity(0.35), FittrTheme.accent.opacity(0.02)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .interpolationMethod(.catmullRom)
+            LineMark(
+                x: .value("Week", point.date),
+                y: .value("Load", point.value)
+            )
+            .foregroundStyle(FittrTheme.accent)
+            .interpolationMethod(.catmullRom)
+            .lineStyle(StrokeStyle(lineWidth: 2))
+        }
+        .chartXAxis(.hidden)
+        .chartYAxis(.hidden)
+        .chartLegend(.hidden)
+        .accessibilityLabel("Strength trend")
+    }
+}
 
 /// Compact "nothing here yet" row. Used where a full ContentUnavailableView
 /// would be heavier than the thing it is standing in for.

@@ -72,6 +72,27 @@ enum AnalyticsEngine {
             .first
     }
 
+    /// The last time each exercise was actually lifted, whichever workout it was
+    /// in. Monday and Thursday are separate templates with the same lifts, so
+    /// keying "last time" on the template made Thursday ignore Monday's numbers.
+    /// An exercise skipped last session falls through to the one before.
+    static func latestExerciseSessions(
+        before startedAt: Date,
+        excluding sessionID: UUID?,
+        in sessions: [WorkoutSession]
+    ) -> [UUID: ExerciseSession] {
+        var latest: [UUID: ExerciseSession] = [:]
+        let earlier = sessions
+            .filter { $0.id != sessionID && $0.endedAt != nil && $0.startedAt < startedAt }
+            .sorted { $0.startedAt > $1.startedAt }
+        for session in earlier {
+            for exercise in session.exercises where latest[exercise.exerciseId] == nil && !exercise.completedSets.isEmpty {
+                latest[exercise.exerciseId] = exercise
+            }
+        }
+        return latest
+    }
+
     static func previousSets(for exerciseId: UUID, in session: WorkoutSession?) -> [ExerciseSet] {
         session?.orderedExercises.first { $0.exerciseId == exerciseId }?.completedSets ?? []
     }

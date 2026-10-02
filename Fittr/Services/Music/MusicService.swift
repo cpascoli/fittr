@@ -122,13 +122,17 @@ final class MusicService: MusicServicing {
         let requested = items.map(\.persistentID)
         let sameQueue = queuedItemIDs == requested
 
+        // A single assigned song loops. A playlist repeats only when asked, so
+        // skipping tracks still moves through the list.
+        let repeatMode: MPMusicRepeatMode = requested.count == 1 ? .one : (repeatAll ? .all : .none)
+
         if restart || !sameQueue {
             holdQueue = false
             pausedAt = nil
             systemPlayer.setQueue(with: MPMediaItemCollection(items: items))
             queuedItemIDs = requested
             systemPlayer.shuffleMode = shuffle ? .songs : .off
-            systemPlayer.repeatMode = repeatAll ? .all : .none
+            systemPlayer.repeatMode = repeatMode
             // `setQueue` is asynchronous. Calling `play()` or setting
             // `currentPlaybackTime` before the queue has actually loaded applies
             // them to the outgoing queue, which is how a new exercise ended up
@@ -142,6 +146,7 @@ final class MusicService: MusicServicing {
             return
         }
 
+        systemPlayer.repeatMode = repeatMode
         if holdQueue {
             resume()
         } else {
@@ -276,6 +281,9 @@ final class MockMusicService: MusicServicing {
     var queuedIDs: [String] = []
     var didShuffle = false
     var didRepeat = false
+    /// True when the queue is one song, which plays on repeat so it restarts
+    /// when it ends instead of falling silent mid-exercise.
+    var loopsCurrentSong = false
 
     func requestAuthorization() async -> Bool {
         isAuthorized = true
@@ -303,7 +311,8 @@ final class MockMusicService: MusicServicing {
         playedIDs.append(first)
         queuedIDs = itemIDs
         didShuffle = shuffle
-        didRepeat = repeatAll
+        loopsCurrentSong = itemIDs.count == 1
+        didRepeat = itemIDs.count > 1 && repeatAll
         nowPlaying = catalog.first { $0.id == first }
         isPlaying = true
     }

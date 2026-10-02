@@ -69,7 +69,13 @@ final class ActiveWorkoutController {
         self.restartExerciseTrack = settings?.restartExerciseTrack ?? true
         (haptics as? HapticService)?.isEnabled = settings?.hapticsEnabled ?? true
         restoreCurrentExercise()
-        previousWorkout = resolvePreviousWorkout()
+        let history = (try? modelContext.fetch(FetchDescriptor<WorkoutSession>())) ?? []
+        previousWorkout = resolvePreviousWorkout(in: history)
+        lastTimeByExercise = AnalyticsEngine.latestExerciseSessions(
+            before: session.startedAt,
+            excluding: session.id,
+            in: history
+        )
         prefillFromHistory()
         if session.endedAt != nil {
             showingSummary = true
@@ -80,6 +86,10 @@ final class ActiveWorkoutController {
         restActive = openRest != nil
         if restActive {
             nextExercisePlan = resolveNextExercisePlan()
+        }
+        // Silence belongs only on the screen between exercises. Rest between sets
+        // of the same exercise keeps the current track going.
+        if isRestingBeforeNextExercise {
             pauseMusicForRest()
         } else {
             isMusicPlaying = music.isPlaying
@@ -147,36 +157,32 @@ final class ActiveWorkoutController {
     private func resolveNextExercisePlan() -> NextExercisePlan? {
         guard let next = nextExerciseSession else { return nil }
         let prescription = next.prescription
-        var load: (weightKg: Double, basis: NextExercisePlan.Basis)?
-        if prescription?.trackingMode.usesWeight ?? false {
-            load = resolveLoad(for: next.exerciseId)
-        }
+        let mode = prescription?.trackingMode
+        // The same resolver `prefillFromHistory` uses once the rest ends, so the
+        // rack trip and the first set agree on a number.
+        let prefill = prefill(for: next, setNumber: next.completedSets.count + 1)
+        let isPerSide = prescription?.laterality == .unilateral
         return NextExercisePlan(
             name: next.exerciseName,
             targetLabel: prescription?.targetRepLabel,
-            weightKg: load?.weightKg,
-            basis: load?.basis,
-            isPerSide: prescription?.laterality == .unilateral,
+            weightKg: (mode?.usesWeight ?? false) ? prefill.weightKg : nil,
+            basis: (mode?.usesWeight ?? false) ? prefill.basis.flatMap(NextExercisePlan.Basis.init) : nil,
+            reps: (mode?.usesReps ?? false) ? (isPerSide ? prefill.leftReps : prefill.reps) : nil,
+            rightReps: (mode?.usesReps ?? false) && isPerSide ? prefill.rightReps : nil,
+            isPerSide: isPerSide,
             equipmentLabel: prescription.map(\.equipment).flatMap { $0 == .none ? nil : $0.title }
         )
     }
 
-    /// Mirrors what `prefillFromHistory` will put in the logger once the rest
-    /// ends, so the rack trip and the first set agree on a number.
-    private func resolveLoad(for exerciseId: UUID) -> (weightKg: Double, basis: NextExercisePlan.Basis)? {
-        if let planned = PlannedLoadService.weight(for: exerciseId, in: modelContext) {
-            return (planned, .planned)
-        }
-        let previous = previousWorkout?.orderedExercises
-            .first { $0.exerciseId == exerciseId }?
-            .completedSets ?? []
-        if let weight = previous.compactMap(\.weightKg).first {
-            return (weight, .lastTime)
-        }
-        if let starting = startingWeightKg(for: exerciseId) {
-            return (starting, .starting)
-        }
-        return nil
+    private func prefill(for exercise: ExerciseSession, setNumber: Int) -> SetPrefill {
+        SetPrefillResolver.resolve(
+            setNumber: setNumber,
+            sessionSets: exercise.completedSets,
+            plannedWeightKg: PlannedLoadService.weight(for: exercise.exerciseId, in: modelContext),
+            previousSets: lastTimeByExercise[exercise.exerciseId]?.completedSets ?? [],
+            startingWeightKg: startingWeightKg(for: exercise.exerciseId),
+            maxReps: exercise.prescription?.maxReps
+        )
     }
 
     private var nextExerciseSession: ExerciseSession? {
@@ -210,19 +216,26 @@ final class ActiveWorkoutController {
         previousExerciseSession?.completedSets ?? []
     }
 
+    /// The last time the current exercise was lifted, in any workout — not just
+    /// the previous run of this template.
     var previousExerciseSession: ExerciseSession? {
         guard let current = currentExercise else { return nil }
-        return previousWorkout?.orderedExercises.first { $0.exerciseId == current.exerciseId }
+        return lastTimeByExercise[current.exerciseId]
     }
 
     /// Resolved once in `init`. Which session this one compares against cannot
     /// change while it is under way, and computing it fetched every workout ever
-    /// recorded — on every body evaluation, several times a second.
+    /// recorded — on every body evaluation, several times a second. Only the
+    /// summary's whole-workout comparison uses it; per-exercise numbers come
+    /// from `lastTimeByExercise`.
     private(set) var previousWorkout: WorkoutSession?
 
-    private func resolvePreviousWorkout() -> WorkoutSession? {
-        let all = (try? modelContext.fetch(FetchDescriptor<WorkoutSession>())) ?? []
-        return AnalyticsEngine.previousComparableSession(
+    /// Resolved once in `init`, for the same reason. Keyed by exercise so a
+    /// replaced exercise still finds its own history.
+    private var lastTimeByExercise: [UUID: ExerciseSession] = [:]
+
+    private func resolvePreviousWorkout(in all: [WorkoutSession]) -> WorkoutSession? {
+        AnalyticsEngine.previousComparableSession(
             for: session.workoutTemplateId,
             type: session.type,
             before: session.id,
@@ -357,7 +370,9 @@ final class ActiveWorkoutController {
         nextExercisePlan = resolveNextExercisePlan()
         persist()
         notifications.scheduleRestComplete(after: TimeInterval(target))
-        pauseMusicForRest()
+        if advancesToNextExercise {
+            pauseMusicForRest()
+        }
     }
 
     func addRest(_ seconds: Int) {
@@ -377,7 +392,9 @@ final class ActiveWorkoutController {
             allowMusicDuringRest = false
             markCurrentExerciseCompleted()
             moveToNextExercise()
-        } else {
+        } else if musicPausedForRest {
+            // The track was left running through this rest, so there is nothing to
+            // resume unless the listener paused it themselves.
             resumeMusicAfterRest()
         }
     }
@@ -475,6 +492,7 @@ final class ActiveWorkoutController {
         persist()
         if let scheduled = session.scheduled {
             try? ScheduleService.markCompleted(scheduled, session: session, in: modelContext)
+            Task { await WorkoutReminderService.reconcile(in: modelContext) }
         }
         lastCreatedRecords = (try? PersonalRecordService.evaluate(session: session, in: modelContext)) ?? []
         comparison = AnalyticsEngine.compare(current: session, previous: previousWorkout)
@@ -548,50 +566,15 @@ final class ActiveWorkoutController {
     }
 
     private func prefillFromHistory() {
-        let previous = previousSets
-        if let planned = currentExercise.flatMap({ PlannedLoadService.weight(for: $0.exerciseId, in: modelContext) }) {
-            draftWeightKg = planned
-            if let matching = previous.first(where: { $0.setNumber == currentSetNumber }) ?? previous.last,
-               let reps = matching.reps {
-                draftReps = min(reps, prescription?.maxReps ?? reps)
-                draftLeftReps = matching.leftReps ?? draftReps
-                draftRightReps = matching.rightReps ?? draftReps
-            } else if let maxReps = prescription?.maxReps, maxReps > 0 {
-                draftReps = min(10, maxReps)
-            }
-            if let duration = prescription?.targetDurationSeconds, duration > 0 {
-                draftDurationSeconds = duration
-            }
-            return
-        }
-        if let matching = previous.first(where: { $0.setNumber == currentSetNumber }) ?? previous.last {
-            if let weight = matching.weightKg {
-                draftWeightKg = weight
-            }
-            if let reps = matching.reps {
-                draftReps = reps
-                draftLeftReps = matching.leftReps ?? reps
-                draftRightReps = matching.rightReps ?? reps
-            }
-        } else if let lastCompleted = currentExercise?.completedSets.last {
-            draftWeightKg = lastCompleted.weightKg ?? draftWeightKg
-            draftReps = lastCompleted.reps ?? draftReps
-        } else {
-            if let starting = startingWeightKg {
-                draftWeightKg = starting
-            }
-            if let maxReps = prescription?.maxReps, maxReps > 0 {
-                draftReps = min(10, maxReps)
-            }
-        }
+        guard let exercise = currentExercise else { return }
+        let values = prefill(for: exercise, setNumber: currentSetNumber)
+        if let weight = values.weightKg { draftWeightKg = weight }
+        if let reps = values.reps { draftReps = reps }
+        if let left = values.leftReps { draftLeftReps = left }
+        if let right = values.rightReps { draftRightReps = right }
         if let duration = prescription?.targetDurationSeconds, duration > 0 {
             draftDurationSeconds = duration
         }
-    }
-
-    private var startingWeightKg: Double? {
-        guard let id = currentExercise?.exerciseId else { return nil }
-        return startingWeightKg(for: id)
     }
 
     private func startingWeightKg(for exerciseId: UUID) -> Double? {
@@ -712,7 +695,7 @@ final class ActiveWorkoutController {
     private func playAssignedMusicIfNeeded() {
         guard session.endedAt == nil, !showingSummary else { return }
         guard autoPlayExerciseTrack, !musicStoppedByUser, let exercise = currentExercise else { return }
-        if isResting && !allowMusicDuringRest { return }
+        if isRestingBeforeNextExercise && !allowMusicDuringRest { return }
         let assignments = (try? modelContext.fetch(FetchDescriptor<MusicAssignment>())) ?? []
         let assignment: MusicAssignment
         let restart: Bool
@@ -753,7 +736,7 @@ final class ActiveWorkoutController {
                 music.pause()
                 return
             }
-            if isResting && !allowMusicDuringRest {
+            if isRestingBeforeNextExercise && !allowMusicDuringRest {
                 music.pause()
                 isMusicPlaying = false
                 return
@@ -787,6 +770,14 @@ struct NextExercisePlan: Equatable, Sendable {
         case lastTime
         case starting
 
+        init?(_ basis: SetPrefill.Basis) {
+            switch basis {
+            case .planned: self = .planned
+            case .lastTime, .thisSession: self = .lastTime
+            case .starting: self = .starting
+            }
+        }
+
         var label: String {
             switch self {
             case .planned: "Planned"
@@ -800,6 +791,10 @@ struct NextExercisePlan: Equatable, Sendable {
     var targetLabel: String?
     var weightKg: Double?
     var basis: Basis?
+    /// Reps the first set will start from. For a per-side exercise this is the
+    /// left side and `rightReps` the right.
+    var reps: Int?
+    var rightReps: Int?
     var isPerSide: Bool
     var equipmentLabel: String?
 }

@@ -74,6 +74,44 @@ struct MusicPlaybackTests {
 
         #expect(music.playedIDs == ["squat-song", "workout-song"])
     }
+
+    /// Rest between sets of the same exercise keeps the track going, and a single
+    /// assigned song is set to restart when it ends. Silence starts only once the
+    /// exercise is finished and the rest before the next one begins.
+    @Test func musicContinuesThroughSetRestAndStopsBetweenExercises() async throws {
+        let context = try makeContext()
+        let music = MockMusicService()
+        music.catalog = [track("squat-song"), track("deadlift-song")]
+        assign(itemID: "squat-song", to: SeedID.gobletSquat, in: context)
+        assign(itemID: "deadlift-song", to: SeedID.romanianDeadlift, in: context)
+
+        let controller = try makeController(music: music, in: context, targetSets: 2)
+        try await tick()
+        #expect(music.isPlaying)
+        #expect(music.loopsCurrentSong)
+        #expect(music.playedIDs == ["squat-song"])
+
+        controller.completeSet()
+        #expect(controller.isResting)
+        #expect(controller.isRestingBeforeNextExercise == false)
+        #expect(music.isPlaying)
+        #expect(music.playedIDs == ["squat-song"])
+
+        controller.startNextSet()
+        #expect(music.isPlaying)
+        #expect(music.playedIDs == ["squat-song"])
+
+        controller.completeSet()
+        #expect(controller.isRestingBeforeNextExercise)
+        #expect(music.isPlaying == false)
+
+        controller.startNextSet()
+        try await tick()
+        #expect(controller.currentExercise?.exerciseId == SeedID.romanianDeadlift)
+        #expect(music.isPlaying)
+        #expect(music.playedIDs == ["squat-song", "deadlift-song"])
+        #expect(music.loopsCurrentSong)
+    }
 }
 
 private extension MusicPlaybackTests {
@@ -104,9 +142,13 @@ private extension MusicPlaybackTests {
         try await Task.sleep(for: .milliseconds(50))
     }
 
-    func makeController(music: MockMusicService, in context: ModelContext) throws -> ActiveWorkoutController {
-        let first = snapshot(id: SeedID.gobletSquat, name: "Goblet Squat", order: 0)
-        let second = snapshot(id: SeedID.romanianDeadlift, name: "Romanian Deadlift", order: 1)
+    func makeController(
+        music: MockMusicService,
+        in context: ModelContext,
+        targetSets: Int = 1
+    ) throws -> ActiveWorkoutController {
+        let first = snapshot(id: SeedID.gobletSquat, name: "Goblet Squat", order: 0, targetSets: targetSets)
+        let second = snapshot(id: SeedID.romanianDeadlift, name: "Romanian Deadlift", order: 1, targetSets: targetSets)
         let template = TemplateSnapshot(
             templateId: SeedID.mondayStrength,
             name: "Full Body Strength",
@@ -149,7 +191,7 @@ private extension MusicPlaybackTests {
         )
     }
 
-    func snapshot(id: UUID, name: String, order: Int) -> TemplateExerciseSnapshot {
+    func snapshot(id: UUID, name: String, order: Int, targetSets: Int = 1) -> TemplateExerciseSnapshot {
         TemplateExerciseSnapshot(
             id: UUID(),
             exerciseId: id,
@@ -158,7 +200,7 @@ private extension MusicPlaybackTests {
             trackingMode: .repsWeight,
             laterality: .bilateral,
             order: order,
-            targetSets: 1,
+            targetSets: targetSets,
             minReps: 8,
             maxReps: 12,
             targetDurationSeconds: nil,

@@ -51,8 +51,13 @@ struct AnalyticsView: View {
             SectionLabel(text: "Strength")
             let strength = filteredSessions.filter { $0.type == .strength }
             MetricTile(title: "Weekly volume", value: NumberFormatting.volume(currentWeeklyVolume, units: units))
-            chart("Training volume", points: volumePoints(strength))
-            chart("Sets / week", points: weeklyCount(strength, value: { Double($0.completedSetCount) }))
+            chart("Training volume", points: volumePoints(strength), format: { NumberFormatting.volume($0, units: units) })
+            chart(
+                "Sets / week",
+                points: weeklyCount(strength, value: { Double($0.completedSetCount) }),
+                format: { "\(Int($0.rounded())) sets" },
+                style: .bar
+            )
             if let exerciseId = selectedExerciseId ?? strengthExercises.first?.id {
                 Picker("Exercise", selection: Binding(
                     get: { selectedExerciseId ?? exerciseId },
@@ -62,8 +67,8 @@ struct AnalyticsView: View {
                         Text(exercise.name).tag(exercise.id)
                     }
                 }
-                chart("Weight over time", points: weightPoints(for: exerciseId))
-                chart("Estimated 1RM (Epley)", points: epleyPoints(for: exerciseId))
+                chart("Weight over time", points: weightPoints(for: exerciseId), format: { NumberFormatting.weight($0, units: units) })
+                chart("Estimated 1RM", points: epleyPoints(for: exerciseId), format: { NumberFormatting.weight($0, units: units) })
                 Text("Estimated 1RM uses Epley: weight × (1 + reps / 30), only for 1–12 reps. It is an estimate.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -79,12 +84,17 @@ struct AnalyticsView: View {
                 EmptyHint(text: "No cardio or swim sessions in this range", systemImage: "figure.pool.swim")
                     .fittrCard(.subtle)
             } else {
-                chart("Minutes / week", points: weeklyCount(cardio, value: { $0.elapsed() / 60 }))
-                chart("Distance (km)", points: cardio.compactMap { session in
+                chart(
+                    "Minutes / week",
+                    points: weeklyCount(cardio, value: { $0.elapsed() / 60 }),
+                    format: { "\(Int($0.rounded())) min" },
+                    style: .bar
+                )
+                chart("Distance", points: cardio.compactMap { session in
                     let km = session.cardio?.distanceKm ?? ((session.swim?.distanceMeters ?? 0) / 1000)
                     guard km > 0 else { return nil }
                     return ChartPoint(date: session.startedAt, value: km)
-                })
+                }, format: { String(format: "%.1f km", $0) })
             }
         }
     }
@@ -108,14 +118,39 @@ struct AnalyticsView: View {
                             x: .value("Date", entry.recordedAt),
                             y: .value("kg", entry.weightKg)
                         )
+                        .foregroundStyle(FittrTheme.accent.opacity(0.85))
+                        .symbolSize(40)
                     }
                     ForEach(WorkoutMath.movingAverage(values: series.map { DatedValue(date: $0.recordedAt, value: $0.weightKg) }), id: \.date) { point in
+                        AreaMark(
+                            x: .value("Date", point.date),
+                            y: .value("Average", point.value)
+                        )
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [FittrTheme.accent.opacity(0.28), FittrTheme.accent.opacity(0.02)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .interpolationMethod(.catmullRom)
                         LineMark(
                             x: .value("Date", point.date),
                             y: .value("Average", point.value)
                         )
-                            .foregroundStyle(FittrTheme.accent)
+                        .foregroundStyle(FittrTheme.accent)
+                        .interpolationMethod(.catmullRom)
+                        .lineStyle(StrokeStyle(lineWidth: 2.5))
                     }
+                }
+                .chartXAxis {
+                    AxisMarks(values: .automatic(desiredCount: 4)) { _ in
+                        AxisGridLine().foregroundStyle(FittrTheme.hairline)
+                        AxisValueLabel(format: .dateTime.month(.abbreviated).day())
+                    }
+                }
+                .chartYAxis {
+                    AxisMarks(position: .leading, values: .automatic(desiredCount: 3))
                 }
                 .frame(height: 180)
                 if let profile = profiles.first, let latest = series.last {
@@ -131,13 +166,16 @@ struct AnalyticsView: View {
 
     private var adherenceSection: some View {
         let stats = AnalyticsEngine.adherence(planned: scheduled.filter { $0.template?.isOptionalDay == false })
-        return VStack(alignment: .leading, spacing: 8) {
-            SectionLabel(text: "Adherence")
-            Text("Planned \(stats.planned) · Completed \(stats.completed) · Skipped \(stats.skipped)")
-            Text("\(Int((stats.percent * 100).rounded()))% completion")
-                .font(.title3.weight(.semibold))
+        return VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
+                SectionLabel(text: "Adherence")
+                Text("Planned \(stats.planned) · Completed \(stats.completed) · Skipped \(stats.skipped)")
+                Text("\(Int((stats.percent * 100).rounded()))% completion")
+                    .font(.title3.weight(.semibold))
+            }
+            .fittrCard()
+            chart("Completed each week", points: weeklyAdherencePoints(), format: { "\(Int($0.rounded()))%" }, style: .bar)
         }
-        .fittrCard()
     }
 
     private var recordsSection: some View {
@@ -147,7 +185,24 @@ struct AnalyticsView: View {
                 EmptyHint(text: "PRs appear after meaningful bests, not every session", systemImage: "trophy")
             } else {
                 ForEach(records.prefix(8), id: \.id) { record in
-                    Text("\(record.kind.title) · \(record.exerciseName)")
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(record.exerciseName)
+                                .font(.headline)
+                            Text(record.kind.title)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(record.achievedAt.formatted(date: .abbreviated, time: .omitted))
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                        Spacer(minLength: 8)
+                        Text(RecordFormatting.detail(record, units: units))
+                            .font(.subheadline.weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(FittrTheme.accent)
+                            .multilineTextAlignment(.trailing)
+                    }
                 }
             }
         }
@@ -232,22 +287,148 @@ struct AnalyticsView: View {
         }
     }
 
-    private func chart(_ title: String, points: [ChartPoint]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.headline)
+    private func weeklyAdherencePoints() -> [ChartPoint] {
+        let relevant = scheduled.filter { item in
+            guard item.template?.isOptionalDay == false, item.template?.type.isTrainable == true else { return false }
+            guard item.scheduledStart <= .now else { return false }
+            if let start = range.startDate, item.scheduledStart < start { return false }
+            return true
+        }
+        let grouped = Dictionary(grouping: relevant) { DateHelpers.isoWeekStart(for: $0.scheduledStart) }
+        return grouped.keys.sorted().map { week in
+            let items = grouped[week] ?? []
+            let done = items.filter { $0.status == .completed }.count
+            let percent = items.isEmpty ? 0 : (Double(done) / Double(items.count)) * 100
+            return ChartPoint(date: week, value: percent)
+        }
+    }
+
+    private func chart(
+        _ title: String,
+        points: [ChartPoint],
+        format: @escaping (Double) -> String,
+        style: TrendChart.Style = .line
+    ) -> some View {
+        TrendChart(title: title, points: points, format: format, style: style)
+    }
+}
+
+/// A chart with the latest value and how far it has moved, so a curve is readable
+/// without tracing it back to the axis.
+private struct TrendChart: View {
+    let title: String
+    let points: [ChartPoint]
+    let format: (Double) -> String
+    var style: Style = .line
+
+    enum Style {
+        case line
+        case bar
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title).font(.headline)
+                Spacer(minLength: 8)
+                if let last = points.last {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(format(last.value))
+                            .font(.subheadline.weight(.semibold))
+                            .monospacedDigit()
+                        if let delta {
+                            Text(delta.text)
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(delta.rose ? FittrTheme.success : FittrTheme.warning)
+                        }
+                    }
+                }
+            }
             if points.isEmpty {
-                // A one-line hint rather than a tall card saying nothing: an
-                // empty analytics tab was three big boxes of "No data available".
                 EmptyHint(text: "Not enough data yet")
             } else {
-                Chart(points) { point in
-                    LineMark(x: .value("Date", point.date), y: .value(title, point.value))
-                    PointMark(x: .value("Date", point.date), y: .value(title, point.value))
-                }
-                .frame(height: 160)
+                chart
+                    .frame(height: 168)
             }
         }
         .fittrCard()
+    }
+
+    @ViewBuilder
+    private var chart: some View {
+        switch style {
+        case .line:
+            Chart(points) { point in
+                AreaMark(
+                    x: .value("Date", point.date),
+                    y: .value(title, point.value)
+                )
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [FittrTheme.accent.opacity(0.32), FittrTheme.accent.opacity(0.02)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .interpolationMethod(.catmullRom)
+                LineMark(
+                    x: .value("Date", point.date),
+                    y: .value(title, point.value)
+                )
+                .foregroundStyle(FittrTheme.accent)
+                .interpolationMethod(.catmullRom)
+                .lineStyle(StrokeStyle(lineWidth: 2.5))
+                if point.id == points.last?.id {
+                    PointMark(
+                        x: .value("Date", point.date),
+                        y: .value(title, point.value)
+                    )
+                    .foregroundStyle(FittrTheme.accent)
+                    .symbolSize(60)
+                }
+            }
+            .chartXAxis { axis }
+            .chartYAxis { yAxis }
+            .chartLegend(.hidden)
+        case .bar:
+            Chart(points) { point in
+                BarMark(
+                    x: .value("Date", point.date),
+                    y: .value(title, point.value)
+                )
+                .foregroundStyle(FittrTheme.accent.gradient)
+                .cornerRadius(4)
+            }
+            .chartXAxis { axis }
+            .chartYAxis { yAxis }
+            .chartLegend(.hidden)
+        }
+    }
+
+    private var axis: some AxisContent {
+        AxisMarks(values: .automatic(desiredCount: 4)) { _ in
+            AxisGridLine().foregroundStyle(FittrTheme.hairline)
+            AxisValueLabel(format: .dateTime.month(.abbreviated).day())
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var yAxis: some AxisContent {
+        AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) { _ in
+            AxisGridLine().foregroundStyle(FittrTheme.hairline)
+            AxisValueLabel().foregroundStyle(.secondary)
+        }
+    }
+
+    private var delta: (text: String, rose: Bool)? {
+        guard points.count >= 2, let first = points.first?.value, let last = points.last?.value else { return nil }
+        let change = last - first
+        guard abs(change) >= 0.05 else { return nil }
+        let magnitude = format(abs(change))
+        if change > 0 {
+            return ("+\(magnitude)", true)
+        }
+        return ("−\(magnitude)", false)
     }
 }
 

@@ -9,6 +9,7 @@ struct TodayView: View {
     @Query(sort: \ScheduledWorkout.scheduledStart) private var scheduled: [ScheduledWorkout]
     @Query(sort: \BodyWeightEntry.recordedAt, order: .reverse) private var weights: [BodyWeightEntry]
     @Query(sort: \PersonalRecord.achievedAt, order: .reverse) private var records: [PersonalRecord]
+    @Query private var plannedLoads: [PlannedExerciseLoad]
 
     @Binding var presentedSession: WorkoutSession?
     @State private var sessionPendingDiscard: WorkoutSession?
@@ -158,6 +159,9 @@ struct TodayView: View {
                         StatusChip(text: "\(template.orderedExercises.count) exercises")
                         StatusChip(text: "~\(template.estimatedDurationMinutes) min")
                     }
+                    if let cue = cue(for: template) {
+                        sessionCue(cue)
+                    }
                     Button("Start Workout") {
                         start(template: template, scheduled: item)
                     }
@@ -267,6 +271,10 @@ struct TodayView: View {
                 Text(record.kind.title)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Text(RecordFormatting.detail(record, units: units))
+                    .font(.subheadline.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(FittrTheme.accent)
             }
             Spacer(minLength: 0)
         }
@@ -311,6 +319,84 @@ struct TodayView: View {
             RoundedRectangle(cornerRadius: FittrTheme.cardCornerRadius, style: .continuous)
                 .strokeBorder(FittrTheme.warning, lineWidth: 2)
         )
+    }
+
+    private var units: UnitSystem { profiles.first?.liftingUnits ?? .metric }
+
+    private func sessionCue(_ cue: SessionCue) -> some View {
+        let trend = trend(for: cue.exerciseId)
+        let change = StrengthTrend.change(across: trend)
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(cue.headline)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(cue.readyToProgress ? FittrTheme.accent : .primary)
+                .fixedSize(horizontal: false, vertical: true)
+            if trend.count >= 2 {
+                StrengthSparkline(points: trend)
+                    .frame(height: 48)
+                if let change, abs(change) >= 0.4 {
+                    Text("Estimated max \(NumberFormatting.signedWeight(change, units: units))")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(change >= 0 ? FittrTheme.success : FittrTheme.warning)
+                }
+            }
+        }
+    }
+
+    private func cue(for template: WorkoutTemplate) -> SessionCue? {
+        // Per exercise, across every workout: Thursday's cue should know what
+        // was lifted on Monday.
+        let lastTime = AnalyticsEngine.latestExerciseSessions(
+            before: .now,
+            excluding: nil,
+            in: sessions
+        )
+        let lifts: [LiftSnapshot] = template.orderedExercises.compactMap { slot in
+            guard let exercise = slot.exercise else { return nil }
+            let mode = slot.trackingModeOverride ?? exercise.trackingMode
+            guard mode.usesWeight else { return nil }
+            let logged = lastTime[exercise.id]?.completedSets ?? []
+            return LiftSnapshot(
+                exerciseId: exercise.id,
+                exerciseName: exercise.name,
+                targetSets: slot.targetSets,
+                maxReps: slot.maxReps,
+                sets: logged.map {
+                    CompletedSetSummary(
+                        setNumber: $0.setNumber,
+                        weightKg: $0.weightKg,
+                        reps: $0.reps,
+                        rir: $0.rir,
+                        status: $0.status
+                    )
+                }
+            )
+        }
+        let planned = Dictionary(plannedLoads.map { ($0.exerciseId, $0.weightKg) }, uniquingKeysWith: { _, latest in latest })
+        return SessionCueBuilder.cue(
+            lifts: lifts,
+            plannedWeightKg: planned,
+            incrementKg: settings.first?.weightIncrementKg ?? 2,
+            formatWeight: { NumberFormatting.weight($0, units: units) }
+        )
+    }
+
+    private func trend(for exerciseId: UUID) -> [DatedValue] {
+        let samples: [StrengthSample] = sessions.flatMap { (session) -> [StrengthSample] in
+            guard session.endedAt != nil else { return [] }
+            return session.orderedExercises
+                .filter { $0.exerciseId == exerciseId }
+                .flatMap(\.completedSets)
+                .compactMap { set in
+                    guard let weight = set.weightKg, let reps = set.reps else { return nil }
+                    return StrengthSample(
+                        date: set.completedAt ?? session.startedAt,
+                        weightKg: weight,
+                        reps: reps
+                    )
+                }
+        }
+        return StrengthTrend.weeklyBestEstimates(samples)
     }
 
     private func scheduleLine(_ item: ScheduledWorkout) -> String {

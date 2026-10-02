@@ -232,7 +232,10 @@ struct PlanView: View {
         // Every mutation on this screen routes through here, so the calendar
         // follows moves, skips and new days without each action remembering to.
         // No-ops unless Calendar sync is on.
-        Task { await CalendarSyncService.reconcile(in: modelContext) }
+        Task {
+            await CalendarSyncService.reconcile(in: modelContext)
+            await WorkoutReminderService.reconcile(in: modelContext)
+        }
     }
 }
 

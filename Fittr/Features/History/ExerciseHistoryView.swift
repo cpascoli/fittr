@@ -11,6 +11,18 @@ struct ExerciseHistoryView: View {
 
     var body: some View {
         List {
+            if trend.count >= 2 {
+                Section {
+                    StrengthSparkline(points: trend)
+                        .frame(height: 88)
+                        .listRowBackground(Color.clear)
+                    if let change = StrengthTrend.change(across: trend), abs(change) >= 0.4 {
+                        Text("Estimated max \(NumberFormatting.signedWeight(change, units: units))")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(change >= 0 ? FittrTheme.success : FittrTheme.warning)
+                    }
+                }
+            }
             ForEach(rows, id: \.id) { row in
                 VStack(alignment: .leading, spacing: 4) {
                     Text(row.date.formatted(date: .abbreviated, time: .omitted))
@@ -26,6 +38,24 @@ struct ExerciseHistoryView: View {
             }
         }
         .navigationTitle(exercise.name)
+    }
+
+    private var trend: [DatedValue] {
+        let samples: [StrengthSample] = sessions.flatMap { (session) -> [StrengthSample] in
+            guard session.endedAt != nil else { return [] }
+            return session.orderedExercises
+                .filter { $0.exerciseId == exercise.id }
+                .flatMap(\.completedSets)
+                .compactMap { set in
+                    guard let weight = set.weightKg, let reps = set.reps else { return nil }
+                    return StrengthSample(
+                        date: set.completedAt ?? session.startedAt,
+                        weightKg: weight,
+                        reps: reps
+                    )
+                }
+        }
+        return StrengthTrend.weeklyBestEstimates(samples)
     }
 
     private var rows: [Row] {

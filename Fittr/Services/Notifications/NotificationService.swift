@@ -3,7 +3,7 @@ import UserNotifications
 
 protocol NotificationServicing: AnyObject {
     func requestAuthorizationIfNeeded() async -> Bool
-    func scheduleWorkoutReminder(id: UUID, title: String, fireAt: Date)
+    func scheduleWorkoutReminder(id: UUID, title: String, body: String, fireAt: Date)
     func cancelWorkoutReminder(id: UUID)
     func scheduleRestComplete(after seconds: TimeInterval)
     func cancelRestComplete()
@@ -21,11 +21,11 @@ final class NotificationService: NotificationServicing {
         }
     }
 
-    func scheduleWorkoutReminder(id: UUID, title: String, fireAt: Date) {
+    func scheduleWorkoutReminder(id: UUID, title: String, body: String, fireAt: Date) {
         guard fireAt > Date.now else { return }
         let content = UNMutableNotificationContent()
         content.title = title
-        content.body = "\(title) in 30 minutes"
+        content.body = body
         content.sound = .default
         let interval = max(1, fireAt.timeIntervalSinceNow)
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
@@ -60,12 +60,16 @@ final class MockNotificationService: NotificationServicing {
 
     func requestAuthorizationIfNeeded() async -> Bool { authorized }
 
-    func scheduleWorkoutReminder(id: UUID, title: String, fireAt: Date) {
+    var bodies: [UUID: String] = [:]
+
+    func scheduleWorkoutReminder(id: UUID, title: String, body: String, fireAt: Date) {
         reminders[id] = fireAt
+        bodies[id] = body
     }
 
     func cancelWorkoutReminder(id: UUID) {
         reminders[id] = nil
+        bodies[id] = nil
     }
 
     func scheduleRestComplete(after seconds: TimeInterval) {

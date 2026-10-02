@@ -47,14 +47,13 @@ struct SettingsView: View {
                     }
                     Section("Notifications") {
                         Toggle("Workout reminders", isOn: Bindable(current).workoutRemindersEnabled)
-                            .onChange(of: current.workoutRemindersEnabled) { _, enabled in
-                                if enabled {
-                                    Task {
-                                        _ = await FittrDependencies.shared.notifications.requestAuthorizationIfNeeded()
-                                    }
-                                }
+                            .onChange(of: current.workoutRemindersEnabled) { _, _ in
+                                Task { await WorkoutReminderService.reconcile(in: modelContext) }
                             }
                         Stepper("Remind \(current.reminderLeadMinutes) min before", value: Bindable(current).reminderLeadMinutes, in: 10...120, step: 10)
+                            .onChange(of: current.reminderLeadMinutes) { _, _ in
+                                Task { await WorkoutReminderService.reconcile(in: modelContext) }
+                            }
                     }
                     Section("Apple Health") {
                         Text("Fittr can read weight, heart rate, and steps, and can write completed workouts. Nothing leaves the phone.")

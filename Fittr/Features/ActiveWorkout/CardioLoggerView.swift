@@ -12,29 +12,29 @@ struct CardioLoggerView: View {
                     get: { cardio.activityKind },
                     set: { cardio.activityKind = $0 }
                 ))
-                optionalNumber("Distance (km)", value: Binding(
+                OptionalDecimalField("Distance (km)", value: Binding(
                     get: { cardio.distanceKm },
                     set: { cardio.distanceKm = $0 }
                 ))
-                optionalNumber("Resistance", value: Binding(
+                OptionalDecimalField("Resistance", value: Binding(
                     get: { cardio.resistanceLevel },
                     set: { cardio.resistanceLevel = $0 }
                 ))
-                optionalNumber("Speed (km/h)", value: Binding(
+                OptionalDecimalField("Speed (km/h)", value: Binding(
                     get: { cardio.averageSpeedKmh },
                     set: { cardio.averageSpeedKmh = $0 }
                 ))
-                optionalNumber("Incline %", value: Binding(
+                OptionalDecimalField("Incline %", value: Binding(
                     get: { cardio.inclinePercent },
                     set: { cardio.inclinePercent = $0 }
                 ))
-                optionalNumber("Machine calories", value: Binding(
+                OptionalDecimalField("Machine calories", value: Binding(
                     get: { cardio.machineCalories },
                     set: { cardio.machineCalories = $0 }
                 ))
             }
             if let swim = controller.session.swim {
-                optionalNumber("Pool length (m)", value: Binding(
+                OptionalDecimalField("Pool length (m)", value: Binding(
                     get: { Optional(swim.poolLengthMeters) },
                     set: { if let value = $0 { swim.poolLengthMeters = value } }
                 ))
@@ -74,18 +74,6 @@ struct CardioLoggerView: View {
         }
     }
 
-    private func optionalNumber(_ title: String, value: Binding<Double?>) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
-            TextField(title, text: Binding(
-                get: { value.wrappedValue.map { String($0) } ?? "" },
-                set: { value.wrappedValue = Double($0.replacingOccurrences(of: ",", with: ".")) }
-            ))
-            .keyboardType(.decimalPad)
-            .textFieldStyle(.roundedBorder)
-        }
-    }
-
     private func optionalInt(_ title: String, value: Binding<Int?>) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(.caption).foregroundStyle(.secondary)
@@ -95,6 +83,56 @@ struct CardioLoggerView: View {
             ))
             .keyboardType(.numberPad)
             .textFieldStyle(.roundedBorder)
+        }
+    }
+}
+
+/// Keeps whatever is typed until the field is left. The number is written then,
+/// so "5" is not rewritten to "5.0" while "5.4" is still being entered.
+private struct OptionalDecimalField: View {
+    let title: String
+    @Binding var value: Double?
+    @State private var text = ""
+    @State private var didLoad = false
+    @FocusState private var focused: Bool
+
+    init(_ title: String, value: Binding<Double?>) {
+        self.title = title
+        self._value = value
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            TextField(title, text: $text)
+                .keyboardType(.decimalPad)
+                .textFieldStyle(.roundedBorder)
+                .focused($focused)
+                .onAppear {
+                    guard !didLoad else { return }
+                    text = DecimalFieldDraft.display(value)
+                    didLoad = true
+                }
+                .onChange(of: focused) { _, isFocused in
+                    if !isFocused { commit() }
+                }
+                .onDisappear {
+                    guard didLoad else { return }
+                    commit()
+                }
+        }
+    }
+
+    private func commit() {
+        switch DecimalFieldDraft.commit(text) {
+        case .empty:
+            value = nil
+            text = DecimalFieldDraft.display(value)
+        case .value(let number):
+            value = number
+            text = DecimalFieldDraft.display(value ?? number)
+        case .invalid:
+            text = DecimalFieldDraft.display(value)
         }
     }
 }

@@ -4,7 +4,9 @@ struct ProgressionSuggestion: Equatable, Sendable {
     var exerciseId: UUID
     var exerciseName: String
     var lastWeightKg: Double
-    var lastSets: [String]
+    /// The sets that earned the suggestion, left as numbers so the summary can
+    /// show them in the lifter's units.
+    var workingSets: [CompletedSetSummary]
     var suggestedWeightKg: Double
     var incrementKg: Double
     var reason: String
@@ -36,18 +38,12 @@ enum ProgressionEngine {
         let lastWeight = working.compactMap(\.weightKg).max() ?? 0
         guard lastWeight > 0 else { return nil }
         let suggested = lastWeight + incrementKg
-        let setLines = working
-            .sorted { $0.setNumber < $1.setNumber }
-            .map { set in
-                let reps = set.reps ?? 0
-                return "\(formatWeight(set.weightKg ?? lastWeight)) kg × \(reps)"
-            }
 
         return ProgressionSuggestion(
             exerciseId: exerciseId,
             exerciseName: exerciseName,
             lastWeightKg: lastWeight,
-            lastSets: setLines,
+            workingSets: working.sorted { $0.setNumber < $1.setNumber },
             suggestedWeightKg: suggested,
             incrementKg: incrementKg,
             reason: "All \(targetSets) sets reached \(targetMaxReps) reps with room to spare. Consider a modest increase next time."
@@ -69,13 +65,6 @@ enum ProgressionEngine {
                 incrementKg: incrementKg
             )
         }
-    }
-
-    private static func formatWeight(_ value: Double) -> String {
-        if abs(value.rounded() - value) < 0.05 {
-            return "\(Int(value.rounded()))"
-        }
-        return String(format: "%.1f", value)
     }
 }
 

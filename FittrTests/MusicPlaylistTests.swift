@@ -36,7 +36,9 @@ struct MusicPlaylistTests {
         #expect(assignment.shufflePlaylist == false)
     }
 
-    @Test func aSingleTrackAssignmentIsNotTreatedAsAPlaylist() async throws {
+    /// A single song is not a playlist, but it does loop so the exercise does not
+    /// go quiet when the track ends.
+    @Test func aSingleTrackAssignmentLoopsInsteadOfPlayingOnce() async throws {
         let context = try makeContext()
         let music = MockMusicService()
         music.catalog = [track("solo")]
@@ -56,6 +58,7 @@ struct MusicPlaylistTests {
 
         #expect(music.queuedIDs == ["solo"])
         #expect(music.didRepeat == false)
+        #expect(music.loopsCurrentSong)
     }
 
     /// A playlist emptied or deleted in the Music app should still play the song it

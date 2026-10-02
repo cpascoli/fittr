@@ -204,7 +204,7 @@ struct ActiveWorkoutView: View {
 
     @ViewBuilder
     private var previousCard: some View {
-        if controller.previousWorkout == nil {
+        if controller.previousExerciseSession == nil {
             // One line, not a whole card: on a first session this said nothing
             // and cost the vertical space the technique clip now uses.
             Text("No previous session yet — values start from useful defaults.")
@@ -217,8 +217,8 @@ struct ActiveWorkoutView: View {
 
     private var previousSetsCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let previous = controller.previousWorkout {
-                Text("LAST TIME — \(previous.startedAt.formatted(date: .abbreviated, time: .omitted))")
+            if let previous = controller.previousExerciseSession {
+                Text("LAST TIME — \((previous.workout?.startedAt ?? previous.startedAt ?? .now).formatted(date: .abbreviated, time: .omitted))")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(.secondary)
                 if controller.previousSets.isEmpty {
@@ -233,6 +233,8 @@ struct ActiveWorkoutView: View {
                         if let last = controller.previousSets.first(where: { $0.setNumber == controller.currentSetNumber }) ?? controller.previousSets.last {
                             if let weight = last.weightKg { controller.draftWeightKg = weight }
                             if let reps = last.reps { controller.draftReps = reps }
+                            if let left = last.leftReps { controller.draftLeftReps = left }
+                            if let right = last.rightReps { controller.draftRightReps = right }
                         }
                     }
                     .buttonStyle(SecondaryGymButtonStyle())

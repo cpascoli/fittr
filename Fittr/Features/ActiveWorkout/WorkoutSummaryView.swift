@@ -113,7 +113,7 @@ struct WorkoutSummaryView: View {
                 .font(.headline)
             Text(prompt.exerciseName)
                 .font(.title3.weight(.semibold))
-            Text("Last session: \(prompt.lastSets.joined(separator: ", "))")
+            Text("This session: \(setsLine(prompt))")
             Text("Suggested next session: \(NumberFormatting.weight(prompt.suggestedWeightKg, units: controller.units))")
                 .fontWeight(.semibold)
             if acceptedIds.contains(prompt.exerciseId) {
@@ -145,6 +145,15 @@ struct WorkoutSummaryView: View {
             }
         }
         .fittrCard()
+    }
+
+    private func setsLine(_ prompt: ProgressionSuggestion) -> String {
+        prompt.workingSets
+            .map { set in
+                let weight = NumberFormatting.weight(set.weightKg ?? prompt.lastWeightKg, units: controller.units)
+                return "\(weight) × \(set.reps ?? 0)"
+            }
+            .joined(separator: ", ")
     }
 
     private func writeHealthIfNeeded() async {

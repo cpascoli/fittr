@@ -49,6 +49,117 @@ struct NextExercisePlanTests {
         #expect(plan.basis == .lastTime)
     }
 
+    /// The bug this guards: Monday and Thursday are separate templates with the
+    /// same lifts. "Last time" was keyed on the template, so Thursday showed the
+    /// previous Thursday's numbers and ignored what was lifted on Monday.
+    @Test func lastTimeIsTheLatestSessionOfAnyTemplate() throws {
+        let context = try makeContext()
+        let controller = try makeController(
+            in: context,
+            previous: [
+                .init(templateId: SeedID.mondayStrength, daysAgo: 7, weights: [20, 20], reps: 10),
+                .init(templateId: SeedID.thursdayStrength, daysAgo: 3, weights: [24, 24], reps: 11),
+            ]
+        )
+
+        controller.completeSet()
+
+        let plan = try #require(controller.nextExercisePlan)
+        #expect(plan.weightKg == 24)
+        #expect(plan.reps == 11)
+        #expect(plan.basis == .lastTime)
+    }
+
+    @Test func anExerciseSkippedLastTimeFallsBackToTheTimeBefore() throws {
+        let context = try makeContext()
+        let controller = try makeController(
+            in: context,
+            previous: [
+                .init(templateId: SeedID.mondayStrength, daysAgo: 7, weights: [22], reps: 9),
+                .init(templateId: SeedID.thursdayStrength, daysAgo: 3, weights: [], reps: 0),
+            ]
+        )
+
+        controller.completeSet()
+
+        let plan = try #require(controller.nextExercisePlan)
+        #expect(plan.weightKg == 22)
+        #expect(plan.reps == 9)
+    }
+
+    /// What the rest card promises is what the logger opens with.
+    @Test func theRestCardAgreesWithTheLoggerOnWeightAndReps() throws {
+        let context = try makeContext()
+        let controller = try makeController(in: context, previousWeights: [24, 20], previousReps: 11)
+
+        controller.completeSet()
+        let plan = try #require(controller.nextExercisePlan)
+        controller.startNextSet()
+
+        #expect(controller.draftWeightKg == plan.weightKg)
+        #expect(controller.draftReps == plan.reps)
+    }
+
+    @Test func anAcceptedProgressionReachesBothTheRestCardAndTheLogger() throws {
+        let context = try makeContext()
+        let controller = try makeController(in: context, previousWeights: [24, 24], previousReps: 14)
+        PlannedLoadService.accept(exerciseId: SeedID.romanianDeadlift, weightKg: 26, in: context)
+
+        controller.completeSet()
+        let plan = try #require(controller.nextExercisePlan)
+        controller.startNextSet()
+
+        #expect(plan.weightKg == 26)
+        #expect(plan.reps == 12, "a heavier load starts back inside the 8–12 range")
+        #expect(controller.draftWeightKg == 26)
+        #expect(controller.draftReps == 12)
+    }
+
+    /// What was edited and logged today is what the next session starts from.
+    @Test func editedValuesBecomeNextSessionsStartingPoint() throws {
+        let context = try makeContext()
+        let today = try makeController(in: context, previousWeights: [20], previousReps: 10)
+        today.completeSet()
+        today.startNextSet()
+        today.draftWeightKg = 27.5
+        today.draftReps = 9
+        today.completeSet()
+        #expect(today.session.endedAt != nil)
+
+        let nextTime = try makeController(in: context, startedAt: .now.addingTimeInterval(3600))
+        nextTime.completeSet()
+        let plan = try #require(nextTime.nextExercisePlan)
+
+        #expect(plan.weightKg == 27.5)
+        #expect(plan.reps == 9)
+    }
+
+    /// Reopening the app mid-exercise must not snap the logger back to last
+    /// session's numbers after a set has already been logged differently today.
+    @Test func resumingMidExerciseKeepsTodaysValues() throws {
+        let context = try makeContext()
+        let first = try makeController(in: context, previousWeights: [20, 20], previousReps: 10, secondTargetSets: 2)
+        first.completeSet()
+        first.startNextSet()
+        first.draftWeightKg = 26
+        first.draftReps = 8
+        first.completeSet()
+
+        let resumed = ActiveWorkoutController(
+            session: first.session,
+            modelContext: context,
+            haptics: MockHapticService(),
+            notifications: MockNotificationService(),
+            music: MockMusicService(),
+            settings: nil,
+            profile: nil
+        )
+
+        #expect(resumed.currentExercise?.exerciseId == SeedID.romanianDeadlift)
+        #expect(resumed.draftWeightKg == 26)
+        #expect(resumed.draftReps == 8)
+    }
+
     @Test func anExerciseThatCarriesNoWeightShowsNoWeight() throws {
         let context = try makeContext()
         let controller = try makeController(in: context, nextTrackingMode: .duration)
@@ -81,17 +192,29 @@ private extension NextExercisePlanTests {
         return ModelContext(container)
     }
 
+    struct PreviousSession {
+        var templateId: UUID
+        var daysAgo: Double
+        var weights: [Double]
+        var reps: Int
+    }
+
     func makeController(
         in context: ModelContext,
         nextTrackingMode: TrackingMode = .repsWeight,
-        previousWeights: [Double] = []
+        previousWeights: [Double] = [],
+        previousReps: Int = 10,
+        previous: [PreviousSession] = [],
+        secondTargetSets: Int = 1,
+        startedAt: Date = .now
     ) throws -> ActiveWorkoutController {
         let first = snapshot(id: SeedID.gobletSquat, name: "Goblet Squat", order: 0)
         let second = snapshot(
             id: SeedID.romanianDeadlift,
             name: "Romanian Deadlift",
             order: 1,
-            trackingMode: nextTrackingMode
+            trackingMode: nextTrackingMode,
+            targetSets: secondTargetSets
         )
         let template = TemplateSnapshot(
             templateId: SeedID.mondayStrength,
@@ -102,7 +225,18 @@ private extension NextExercisePlanTests {
             exercises: [first, second]
         )
         if !previousWeights.isEmpty {
-            insertPreviousSession(template: template, second: second, weights: previousWeights, in: context)
+            insertPreviousSession(template: template, second: second, weights: previousWeights, reps: previousReps, in: context)
+        }
+        for item in previous {
+            insertPreviousSession(
+                template: template,
+                second: second,
+                weights: item.weights,
+                reps: item.reps,
+                templateId: item.templateId,
+                daysAgo: item.daysAgo,
+                in: context
+            )
         }
 
         let session = WorkoutSession(
@@ -112,6 +246,7 @@ private extension NextExercisePlanTests {
             templateSnapshotJSON: SnapshotCodec.encode(template),
             workoutTemplateId: template.templateId
         )
+        session.startedAt = startedAt
         session.exercises = [first, second].map { item in
             ExerciseSession(
                 exerciseId: item.exerciseId,
@@ -123,9 +258,12 @@ private extension NextExercisePlanTests {
         }
         context.insert(session)
 
-        let settings = AppSettings(id: SeedID.settings)
+        let settings = try context.fetch(FetchDescriptor<AppSettings>()).first ?? {
+            let created = AppSettings(id: SeedID.settings)
+            context.insert(created)
+            return created
+        }()
         settings.autoPlayExerciseTrack = false
-        context.insert(settings)
         try context.save()
 
         return ActiveWorkoutController(
@@ -143,6 +281,9 @@ private extension NextExercisePlanTests {
         template: TemplateSnapshot,
         second: TemplateExerciseSnapshot,
         weights: [Double],
+        reps: Int,
+        templateId: UUID? = nil,
+        daysAgo: Double = 7,
         in context: ModelContext
     ) {
         let previous = WorkoutSession(
@@ -150,9 +291,9 @@ private extension NextExercisePlanTests {
             type: template.type,
             source: .manual,
             templateSnapshotJSON: SnapshotCodec.encode(template),
-            workoutTemplateId: template.templateId
+            workoutTemplateId: templateId ?? template.templateId
         )
-        previous.startedAt = .now.addingTimeInterval(-7 * 24 * 3600)
+        previous.startedAt = .now.addingTimeInterval(-daysAgo * 24 * 3600)
         previous.endedAt = previous.startedAt.addingTimeInterval(3000)
         let exercise = ExerciseSession(
             exerciseId: second.exerciseId,
@@ -165,7 +306,7 @@ private extension NextExercisePlanTests {
             ExerciseSet(
                 setNumber: index + 1,
                 weightKg: weight,
-                reps: 10,
+                reps: reps,
                 status: .completed,
                 laterality: .bilateral,
                 exercise: exercise
@@ -180,7 +321,8 @@ private extension NextExercisePlanTests {
         id: UUID,
         name: String,
         order: Int,
-        trackingMode: TrackingMode = .repsWeight
+        trackingMode: TrackingMode = .repsWeight,
+        targetSets: Int = 1
     ) -> TemplateExerciseSnapshot {
         TemplateExerciseSnapshot(
             id: UUID(),
@@ -190,7 +332,7 @@ private extension NextExercisePlanTests {
             trackingMode: trackingMode,
             laterality: .bilateral,
             order: order,
-            targetSets: 1,
+            targetSets: targetSets,
             minReps: 8,
             maxReps: 12,
             targetDurationSeconds: trackingMode == .duration ? 45 : nil,
