@@ -45,7 +45,7 @@ struct HistoryView: View {
                     }
                 }
                 ForEach(grouped.keys.sorted(by: >), id: \.self) { month in
-                    Section(month) {
+                    Section(month.formatted(.dateTime.month(.wide).year())) {
                         ForEach(grouped[month] ?? [], id: \.id) { session in
                             NavigationLink {
                                 WorkoutDetailView(session: session)
@@ -122,9 +122,11 @@ struct HistoryView: View {
         }
     }
 
-    private var grouped: [String: [WorkoutSession]] {
+    /// Keyed by the first day of the month rather than its label: sorting
+    /// "October 2026" and "September 2026" as text put September first.
+    private var grouped: [Date: [WorkoutSession]] {
         Dictionary(grouping: filtered) { session in
-            session.startedAt.formatted(.dateTime.month(.wide).year())
+            Calendar.current.dateInterval(of: .month, for: session.startedAt)?.start ?? session.startedAt
         }
     }
 
