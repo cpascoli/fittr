@@ -6,6 +6,9 @@ struct WorkoutDetailView: View {
     @Environment(\.modelContext) private var modelContext
 
     @Query(sort: \UserProfile.createdAt) private var profiles: [UserProfile]
+    /// Set deletes and duration edits save as they happen, so `hasChanges` alone
+    /// would miss them when deciding whether records need re-deriving.
+    @State private var editedSets = false
 
     private var units: UnitSystem { profiles.first?.liftingUnits ?? .metric }
 
@@ -13,7 +16,7 @@ struct WorkoutDetailView: View {
         List {
             sessionSection
             ForEach(session.orderedExercises, id: \.id) { exercise in
-                ExerciseHistorySection(exercise: exercise)
+                ExerciseHistorySection(exercise: exercise) { editedSets = true }
             }
             if let cardio = session.cardio {
                 CardioEditSection(cardio: cardio)
@@ -23,7 +26,13 @@ struct WorkoutDetailView: View {
             }
         }
         .navigationTitle(session.name)
-        .onDisappear { try? modelContext.save() }
+        .onDisappear {
+            let changed = editedSets || modelContext.hasChanges
+            try? modelContext.save()
+            if changed, session.endedAt != nil {
+                try? PersonalRecordService.rebuildAll(in: modelContext)
+            }
+        }
     }
 
     private var sessionSection: some View {
@@ -50,6 +59,8 @@ struct WorkoutDetailView: View {
 
 private struct ExerciseHistorySection: View {
     @Bindable var exercise: ExerciseSession
+    var onEdit: () -> Void
+    @Environment(\.modelContext) private var modelContext
 
     var body: some View {
         Section(exercise.exerciseName) {
@@ -58,7 +69,14 @@ private struct ExerciseHistorySection: View {
                     .foregroundStyle(.secondary)
             }
             ForEach(exercise.orderedSets, id: \.id) { set in
-                SetEditRow(set: set, restLine: restLine(after: set))
+                SetEditRow(set: set, restLine: restLine(after: set), onEdit: onEdit)
+            }
+            .onDelete { offsets in
+                let sets = exercise.orderedSets
+                for set in offsets.map({ sets[$0] }) {
+                    SetHistoryEditor.delete(set, in: modelContext)
+                }
+                onEdit()
             }
             TextField("Exercise note", text: $exercise.notes)
         }
@@ -76,6 +94,8 @@ private struct ExerciseHistorySection: View {
 private struct SetEditRow: View {
     @Bindable var set: ExerciseSet
     let restLine: String
+    var onEdit: () -> Void
+    @Environment(\.modelContext) private var modelContext
     @Query(sort: \UserProfile.createdAt) private var profiles: [UserProfile]
 
     private var units: UnitSystem { profiles.first?.liftingUnits ?? .metric }
@@ -101,11 +121,39 @@ private struct SetEditRow: View {
                     set: { set.reps = $0 }
                 ), in: 0...40)
             }
+            if SetHistoryEditor.isTimed(set) {
+                durationStepper
+            }
             Text("Rest after: \(restLine)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             TextField("Set note", text: $set.notes)
         }
+    }
+}
+
+private extension SetEditRow {
+    /// A hold is adjusted in seconds, a ride or swim in whole minutes.
+    var countsInSeconds: Bool {
+        self.set.exercise?.prescription?.trackingMode.countsInSeconds ?? false
+    }
+
+    var durationStepper: some View {
+        let seconds = SetHistoryEditor.duration(of: set) ?? 0
+        let step: Double = countsInSeconds ? 5 : 60
+        return Stepper(
+            "Duration \(DurationFormatting.compact(seconds: seconds))",
+            value: Binding(
+                get: { (seconds / step).rounded() * step },
+                set: { newValue in
+                    SetHistoryEditor.setDuration(newValue, for: set, in: modelContext)
+                    onEdit()
+                }
+            ),
+            in: 0...(countsInSeconds ? 600 : 6 * 3600),
+            step: step
+        )
+        .accessibilityIdentifier("history.setDuration")
     }
 }
 

@@ -115,6 +115,23 @@ enum PersonalRecordService {
         return created
     }
 
+    /// Re-derives every record from the workouts as they now stand. Records are
+    /// a history of new bests, so correcting a set in History — a mistyped
+    /// 200 kg, a ride logged ten minutes long — changes which later sessions
+    /// earned one, not only the session that was edited.
+    static func rebuildAll(in context: ModelContext) throws {
+        for record in try context.fetch(FetchDescriptor<PersonalRecord>()) {
+            context.delete(record)
+        }
+        try context.save()
+        let finished = try context.fetch(FetchDescriptor<WorkoutSession>())
+            .filter { $0.endedAt != nil }
+            .sorted { $0.startedAt < $1.startedAt }
+        for session in finished {
+            try evaluate(session: session, in: context)
+        }
+    }
+
     private static func isNewBest(
         existing: [PersonalRecord],
         kind: PersonalRecordKind,
