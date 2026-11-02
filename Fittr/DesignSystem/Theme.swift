@@ -45,6 +45,10 @@ enum FittrTheme {
     static let cardCornerRadius: CGFloat = 20
     static let gymButtonHeight: CGFloat = 76
     static let gymTouchTarget: CGFloat = 64
+    /// How long a guarded button must be held before it fires. Long enough that
+    /// picking the phone up cannot trigger it, short enough not to feel like a
+    /// punishment when the action is meant.
+    static let holdToConfirmSeconds: TimeInterval = 3
 }
 
 /// How much a card should stand out from the ones around it.

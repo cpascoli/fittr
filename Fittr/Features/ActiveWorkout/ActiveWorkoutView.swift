@@ -11,7 +11,9 @@ struct ActiveWorkoutView: View {
     @Query private var assignments: [MusicAssignment]
     @Query(sort: \UserProfile.createdAt) private var profiles: [UserProfile]
     @State private var showingMusicPicker = false
-    @State private var confirmSkipOptional = false
+    /// A menu action waiting for its hold. Skipping and finishing used to fire on
+    /// a tap, and a phone picked up off the bench tapped them often enough.
+    @State private var pendingAction: GuardedAction?
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -63,15 +65,31 @@ struct ActiveWorkoutView: View {
                 }
             }
             .sheet(isPresented: $showingMusicPicker) {
-                MusicPickerView(exerciseId: controller.currentExercise?.exerciseId)
+                MusicPickerView(exerciseId: controller.currentExercise?.exerciseId) {
+                    controller.assignedMusicDidChange()
+                }
             }
-            .confirmationDialog(
-                "Skip \(controller.currentExercise?.exerciseName ?? "this exercise")?",
-                isPresented: $confirmSkipOptional,
-                titleVisibility: .visible
-            ) {
-                Button("Skip exercise") { controller.skipExercise() }
-                Button("Keep it", role: .cancel) {}
+            .sheet(item: $pendingAction) { action in
+                let name = controller.currentExercise?.exerciseName ?? "this exercise"
+                switch action {
+                case .skipExercise:
+                    HoldToConfirmSheet(
+                        title: "Skip \(name)?",
+                        message: "It will be logged as skipped and the workout moves on.",
+                        buttonTitle: "HOLD TO SKIP",
+                        fill: FittrTheme.warning
+                    ) {
+                        controller.skipExercise()
+                    }
+                case .finishWorkout:
+                    HoldToConfirmSheet(
+                        title: "Finish the workout?",
+                        message: "Anything not done yet stays undone. The summary comes next.",
+                        buttonTitle: "HOLD TO FINISH"
+                    ) {
+                        controller.finishWorkout()
+                    }
+                }
             }
             .onAppear {
                 controller.pulse()
@@ -193,10 +211,12 @@ struct ActiveWorkoutView: View {
                 }
             }
             if controller.prescription?.isOptional == true {
-                Button("Skip optional — no machine") {
-                    confirmSkipOptional = true
+                HoldToConfirmButton(
+                    title: "Skip optional — no machine",
+                    fill: FittrTheme.warning
+                ) {
+                    controller.skipExercise()
                 }
-                .buttonStyle(GymButtonStyle(fill: FittrTheme.warning, foreground: .black))
                 .accessibilityIdentifier("workout.skipOptional")
             }
         }
@@ -303,11 +323,20 @@ struct ActiveWorkoutView: View {
     private var bottomBar: some View {
         VStack(spacing: 10) {
             if controller.isResting {
-                Button(controller.isRestingBeforeNextExercise ? "START NEXT EXERCISE" : "START NEXT SET") {
-                    controller.startNextSet()
+                // Between sets a tap is fine: a stray one only cuts a rest short.
+                // Between exercises it is guarded, because there is no way back.
+                if controller.isRestingBeforeNextExercise {
+                    HoldToConfirmButton(title: "START NEXT EXERCISE") {
+                        controller.startNextSet()
+                    }
+                    .accessibilityIdentifier("workout.startNextSet")
+                } else {
+                    Button("START NEXT SET") {
+                        controller.startNextSet()
+                    }
+                    .buttonStyle(GymButtonStyle())
+                    .accessibilityIdentifier("workout.startNextSet")
                 }
-                .buttonStyle(GymButtonStyle())
-                .accessibilityIdentifier("workout.startNextSet")
                 HStack(spacing: 8) {
                     Button("+15s") { controller.addRest(15) }
                         .buttonStyle(SecondaryGymButtonStyle(compact: true))
@@ -327,9 +356,10 @@ struct ActiveWorkoutView: View {
                 .buttonStyle(GymButtonStyle())
                 .accessibilityIdentifier("workout.completeSet")
                 HStack {
-                    Button("Finish Exercise") { controller.finishExercise(advance: true) }
-                        .buttonStyle(SecondaryGymButtonStyle())
-                        .accessibilityIdentifier("workout.finishExercise")
+                    HoldToConfirmButton(title: "Finish Exercise", compact: true) {
+                        controller.finishExercise(advance: true)
+                    }
+                    .accessibilityIdentifier("workout.finishExercise")
                     Button("Add Set") { controller.addSet() }
                         .buttonStyle(SecondaryGymButtonStyle())
                 }
@@ -448,6 +478,14 @@ struct ActiveWorkoutView: View {
         return "No assigned track"
     }
 
+    /// The row names what was chosen for this exercise, not whatever the player
+    /// happens to be on. A single song is checked by ID; a playlist's songs are
+    /// resolved at playback time and not known here, so it is taken at its word.
+    private func matches(_ current: MusicTrackInfo, _ assignment: MusicAssignment?) -> Bool {
+        guard let assignment, !assignment.isPlaylist else { return true }
+        return current.id == assignment.musicItemID
+    }
+
     private var assignedMusic: MusicAssignment? {
         guard let exerciseID = controller.currentExercise?.exerciseId else { return nil }
         return assignments.first { $0.exerciseId == exerciseID }
@@ -466,6 +504,14 @@ struct ActiveWorkoutView: View {
         }
         return "Set \(set.setNumber)"
     }
+}
+
+/// Menu actions that must be held to confirm. The menu itself fires on a tap, so
+/// each of these opens a sheet where the hold happens.
+private enum GuardedAction: String, Identifiable {
+    case skipExercise
+    case finishWorkout
+    var id: String { rawValue }
 }
 
 /// The workout clock, ticking on its own rather than through the controller. It

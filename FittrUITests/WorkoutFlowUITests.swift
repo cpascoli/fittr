@@ -1,6 +1,11 @@
 import XCTest
 
 final class WorkoutFlowUITests: XCTestCase {
+    /// Skipping, finishing and moving between exercises are hold-to-confirm, so a
+    /// tap does nothing. The press runs a little past the hold so the timer has
+    /// definitely fired by the time the finger lifts.
+    private let hold: TimeInterval = 3.6
+
     override func setUpWithError() throws {
         continueAfterFailure = false
     }
@@ -48,11 +53,14 @@ final class WorkoutFlowUITests: XCTestCase {
         }
 
         if app.buttons["workout.finishExercise"].waitForExistence(timeout: 3) {
-            app.buttons["workout.finishExercise"].tap()
+            app.buttons["workout.finishExercise"].press(forDuration: hold)
         }
 
         app.buttons["workout.menu"].tap()
         app.buttons["Finish workout"].tap()
+        let confirmFinish = app.buttons["workout.confirm.hold"]
+        XCTAssertTrue(confirmFinish.waitForExistence(timeout: 3))
+        confirmFinish.press(forDuration: hold)
 
         let save = app.buttons["workout.save"]
         XCTAssertTrue(save.waitForExistence(timeout: 6))
@@ -95,6 +103,10 @@ final class WorkoutFlowUITests: XCTestCase {
         for _ in 0..<6 {
             app.buttons["workout.menu"].tap()
             app.buttons["Skip exercise"].tap()
+            let confirmSkip = app.buttons["workout.confirm.hold"]
+            XCTAssertTrue(confirmSkip.waitForExistence(timeout: 3))
+            confirmSkip.press(forDuration: hold)
+            XCTAssertTrue(confirmSkip.waitForNonExistence(timeout: 3))
         }
 
         let startHold = app.buttons["workout.startHold"]
