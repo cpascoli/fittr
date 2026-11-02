@@ -38,8 +38,8 @@ struct ActiveWorkoutView: View {
                     Menu {
                         Button("Add note") { controller.showingNote = true }
                         Button("Replace exercise") { controller.showingReplace = true }
-                        Button("Skip exercise", role: .destructive) { controller.skipExercise() }
-                        Button("Finish workout") { controller.finishWorkout() }
+                        Button("Skip exercise", role: .destructive) { pendingAction = .skipExercise }
+                        Button("Finish workout") { pendingAction = .finishWorkout }
                     } label: {
                         Image(systemName: "ellipsis.circle")
                     }
@@ -435,7 +435,7 @@ struct ActiveWorkoutView: View {
 
     private var assignedMusicTitle: String {
         let assignment = assignedMusic
-        if let current = music.nowPlaying {
+        if let current = music.nowPlaying, matches(current, assignment) {
             let line = "\(current.artist) — \(current.title)"
             // Name the playlist as well as the song, so it is obvious that more is
             // queued behind this one and skipping will land somewhere.

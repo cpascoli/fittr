@@ -4,6 +4,10 @@ import SwiftUI
 struct MusicPickerView: View {
     var exerciseId: UUID?
     var template: WorkoutTemplate?
+    /// Runs once the new assignment is saved, before the sheet closes. The sheet's
+    /// own dismissal cannot tell a choice from a Close tap, and the workout screen
+    /// needs to act only on the former.
+    var onAssigned: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query private var assignments: [MusicAssignment]
@@ -245,6 +249,7 @@ private extension MusicPickerView {
         }
         modelContext.insert(assignment)
         try? modelContext.save()
+        onAssigned?()
         dismiss()
     }
 

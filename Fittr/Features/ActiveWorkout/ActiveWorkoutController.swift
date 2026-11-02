@@ -692,19 +692,38 @@ final class ActiveWorkoutController {
         isMusicPlaying = true
     }
 
+    /// The user just assigned a track to the current exercise from the workout
+    /// screen. The assignment is saved by then, but nothing else would act on it
+    /// until the next exercise, so the old song kept playing and the music row kept
+    /// naming it. Playing straight away is also the only feedback that the choice
+    /// stuck. An explicit choice overrides an earlier Stop and the auto-play setting:
+    /// picking a song is asking to hear it.
+    func assignedMusicDidChange() {
+        guard session.endedAt == nil, !showingSummary else { return }
+        musicStoppedByUser = false
+        musicPausedForRest = false
+        allowMusicDuringRest = isResting
+        playAssignedMusic(forceRestart: true)
+    }
+
     private func playAssignedMusicIfNeeded() {
         guard session.endedAt == nil, !showingSummary else { return }
-        guard autoPlayExerciseTrack, !musicStoppedByUser, let exercise = currentExercise else { return }
+        guard autoPlayExerciseTrack, !musicStoppedByUser, currentExercise != nil else { return }
         if isRestingBeforeNextExercise && !allowMusicDuringRest { return }
+        playAssignedMusic(forceRestart: false)
+    }
+
+    private func playAssignedMusic(forceRestart: Bool) {
+        guard let exercise = currentExercise else { return }
         let assignments = (try? modelContext.fetch(FetchDescriptor<MusicAssignment>())) ?? []
         let assignment: MusicAssignment
         let restart: Bool
         if let match = assignments.first(where: { $0.exerciseId == exercise.exerciseId && $0.scope == .exercise }) {
             assignment = match
-            restart = restartExerciseTrack && match.restartFromBeginning
+            restart = forceRestart || (restartExerciseTrack && match.restartFromBeginning)
         } else if let workoutMusic = assignments.first(where: { $0.template?.id == session.workoutTemplateId && $0.scope == .workout }) {
             assignment = workoutMusic
-            restart = false
+            restart = forceRestart
         } else {
             return
         }

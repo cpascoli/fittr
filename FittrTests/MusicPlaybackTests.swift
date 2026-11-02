@@ -112,6 +112,74 @@ struct MusicPlaybackTests {
         #expect(music.playedIDs == ["squat-song", "deadlift-song"])
         #expect(music.loopsCurrentSong)
     }
+
+    /// Choosing a track from the workout screen used to save it and do nothing
+    /// else: the old song played on and the row kept naming it, so the choice looked
+    /// lost until the next session.
+    @Test func changingTheTrackMidExercisePlaysTheNewOneAtOnce() async throws {
+        let context = try makeContext()
+        let music = MockMusicService()
+        music.catalog = [track("squat-song"), track("new-squat-song")]
+        assign(itemID: "squat-song", to: SeedID.gobletSquat, in: context)
+
+        let controller = try makeController(music: music, in: context)
+        try await tick()
+        #expect(music.playedIDs == ["squat-song"])
+
+        assign(itemID: "new-squat-song", to: SeedID.gobletSquat, in: context)
+        controller.assignedMusicDidChange()
+        try await tick()
+
+        #expect(music.playedIDs == ["squat-song", "new-squat-song"])
+        #expect(music.nowPlaying?.id == "new-squat-song")
+        #expect(music.isPlaying)
+        #expect(controller.isMusicPlaying)
+    }
+
+    /// Picking a song is asking to hear it, even after Stop was pressed earlier.
+    @Test func changingTheTrackAfterStoppingMusicStillPlaysIt() async throws {
+        let context = try makeContext()
+        let music = MockMusicService()
+        music.catalog = [track("squat-song"), track("new-squat-song")]
+        assign(itemID: "squat-song", to: SeedID.gobletSquat, in: context)
+
+        let controller = try makeController(music: music, in: context)
+        try await tick()
+        controller.stopMusic()
+        #expect(music.isPlaying == false)
+
+        assign(itemID: "new-squat-song", to: SeedID.gobletSquat, in: context)
+        controller.assignedMusicDidChange()
+        try await tick()
+
+        #expect(music.playedIDs == ["squat-song", "new-squat-song"])
+        #expect(music.isPlaying)
+    }
+
+    /// Choosing a track replaces the old assignment rather than sitting beside it,
+    /// and the next session of the same exercise starts with the new one.
+    @Test func aTrackChosenMidWorkoutIsUsedByTheNextSession() async throws {
+        let context = try makeContext()
+        let music = MockMusicService()
+        music.catalog = [track("squat-song"), track("new-squat-song")]
+        assign(itemID: "squat-song", to: SeedID.gobletSquat, in: context)
+
+        let controller = try makeController(music: music, in: context)
+        try await tick()
+        assign(itemID: "new-squat-song", to: SeedID.gobletSquat, in: context)
+        controller.assignedMusicDidChange()
+        try await tick()
+
+        let stored = try context.fetch(FetchDescriptor<MusicAssignment>())
+            .filter { $0.exerciseId == SeedID.gobletSquat }
+        #expect(stored.map(\.musicItemID) == ["new-squat-song"])
+
+        let nextMusic = MockMusicService()
+        nextMusic.catalog = music.catalog
+        _ = try makeController(music: nextMusic, in: context)
+        try await tick()
+        #expect(nextMusic.playedIDs == ["new-squat-song"])
+    }
 }
 
 private extension MusicPlaybackTests {
@@ -124,7 +192,12 @@ private extension MusicPlaybackTests {
         MusicTrackInfo(id: id, title: "Song \(id)", artist: "Artist")
     }
 
+    /// Mirrors the picker: one assignment per exercise, the newest replacing the old.
     func assign(itemID: String, to exerciseId: UUID, in context: ModelContext) {
+        let existing = (try? context.fetch(FetchDescriptor<MusicAssignment>())) ?? []
+        for old in existing where old.exerciseId == exerciseId {
+            context.delete(old)
+        }
         context.insert(
             MusicAssignment(
                 scope: .exercise,
