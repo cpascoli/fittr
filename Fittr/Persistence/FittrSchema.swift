@@ -41,6 +41,7 @@ enum FittrModels {
             RestInterval.self,
             CardioMetrics.self,
             SwimMetrics.self,
+            DailyActivity.self,
         ]
     }
 }

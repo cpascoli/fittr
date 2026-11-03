@@ -90,12 +90,13 @@ struct ExportImportView: View {
                     id: sessionDTO.id,
                     name: sessionDTO.name,
                     type: WorkoutType(rawValue: sessionDTO.type) ?? .strength,
-                    source: .manual,
+                    source: sessionDTO.source.flatMap(WorkoutSource.init(rawValue:)) ?? .manual,
                     startedAt: sessionDTO.startedAt,
                     endedAt: sessionDTO.endedAt,
                     templateSnapshotJSON: sessionDTO.templateSnapshotJSON,
                     notes: sessionDTO.notes,
                     sessionRPE: sessionDTO.sessionRPE,
+                    healthKitWorkoutUUID: sessionDTO.healthKitWorkoutUUID,
                     workoutTemplateId: SeedID.mondayStrength
                 )
                 for exerciseDTO in sessionDTO.exercises {

@@ -60,6 +60,7 @@ struct ContentView: View {
             }
             await CalendarSyncService.reconcile(in: modelContext)
             await WorkoutReminderService.reconcile(in: modelContext)
+            await HealthActivitySyncService.sync(in: modelContext)
         }
     }
 }

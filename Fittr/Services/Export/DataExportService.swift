@@ -45,6 +45,9 @@ struct SessionDTO: Codable, Sendable {
     var sessionRPE: Int?
     var templateSnapshotJSON: String
     var exercises: [ExerciseSessionDTO]
+    /// Added later; absent from older backups, which decode as manual sessions.
+    var source: String?
+    var healthKitWorkoutUUID: String?
 }
 
 struct ExerciseSessionDTO: Codable, Sendable {
@@ -218,7 +221,9 @@ enum DataExportService {
                         )
                     }
                 )
-            }
+            },
+            source: session.source.rawValue,
+            healthKitWorkoutUUID: session.healthKitWorkoutUUID
         )
     }
 

@@ -7,6 +7,8 @@ struct SettingsView: View {
     @Query private var profiles: [UserProfile]
     @Query(sort: \WorkoutTemplate.weekdayRaw) private var templates: [WorkoutTemplate]
     @State private var healthStatus = "Not connected"
+    @State private var healthImportStatus: String?
+    @State private var importingHealth = false
     @State private var calendarStatus = "Not connected"
     @State private var musicStatus = "Not connected"
 
@@ -56,10 +58,21 @@ struct SettingsView: View {
                             }
                     }
                     Section("Apple Health") {
-                        Text("Fittr can read weight, heart rate, and steps, and can write completed workouts. Nothing leaves the phone.")
+                        Text("Fittr can read weight, heart rate, steps and workouts, and can write completed workouts. Nothing leaves the phone.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Toggle("Write completed workouts to Health", isOn: Bindable(current).healthWriteEnabled)
+                        Toggle("Import walks, runs and daily steps", isOn: Bindable(current).healthImportEnabled)
+                            .onChange(of: current.healthImportEnabled) { _, enabled in
+                                if enabled { Task { await importFromHealth() } }
+                            }
+                        Button(importingHealth ? "Importing…" : "Import from Health now") {
+                            Task { await importFromHealth() }
+                        }
+                        .disabled(importingHealth)
+                        Text(healthImportStatus ?? "Workouts recorded by a watch or another app come in as sessions. Steps, distance and active minutes come in per day, and show on Today and in Analytics.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         Button("Connect Apple Health") {
                             Task { await connectHealth() }
                         }
@@ -131,6 +144,16 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .onDisappear { try? modelContext.save() }
+        }
+    }
+
+    private func importFromHealth() async {
+        importingHealth = true
+        defer { importingHealth = false }
+        if let result = await HealthActivitySyncService.sync(in: modelContext, force: true) {
+            healthImportStatus = result.summary
+        } else {
+            healthImportStatus = "Health is unavailable, or access was not granted. Check Settings › Health › Data Access."
         }
     }
 

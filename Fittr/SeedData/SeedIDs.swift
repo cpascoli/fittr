@@ -4,6 +4,9 @@ enum SeedID {
     static let profile = UUID(uuidString: "aaaaaaaa-0000-0000-0000-000000000001")!
     static let settings = UUID(uuidString: "aaaaaaaa-0000-0000-0000-000000000002")!
     static let plan = UUID(uuidString: "aaaaaaaa-0000-0000-0000-000000000010")!
+    /// Stands in for a template on sessions imported from Apple Health, which
+    /// were never planned in Fittr.
+    static let healthImport = UUID(uuidString: "aaaaaaaa-0000-0000-0000-000000000020")!
 
     static let gobletSquat = UUID(uuidString: "11111111-1111-1111-1111-111111111001")!
     static let romanianDeadlift = UUID(uuidString: "11111111-1111-1111-1111-111111111002")!

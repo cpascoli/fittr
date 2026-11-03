@@ -131,7 +131,9 @@ struct HistoryView: View {
     }
 
     private func delete(_ session: WorkoutSession) {
-        let healthUUID = session.healthKitWorkoutUUID
+        // Only workouts Fittr wrote are Fittr's to remove from Health. An imported
+        // one belongs to the app that recorded it, and would come back anyway.
+        let healthUUID = session.source == .health ? nil : session.healthKitWorkoutUUID
         try? WorkoutSessionDeletionService.delete(session, in: modelContext)
         if let healthUUID {
             Task {
@@ -152,7 +154,9 @@ struct HistoryView: View {
             let distance = session.swim?.distanceMeters.map { "\(Int($0)) m" }
             return [duration, distance].compactMap { $0 }.joined(separator: " · ")
         case .recovery, .rest, .mixed:
-            return duration
+            let distance = session.cardio?.distanceKm.map { NumberFormatting.distanceKm($0, units: .metric) }
+            let origin = session.source == .health ? "Apple Health" : nil
+            return [duration, distance, origin].compactMap { $0 }.joined(separator: " · ")
         }
     }
 }

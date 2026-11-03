@@ -232,6 +232,8 @@ enum ScheduledStatus: String, Codable, CaseIterable, Identifiable {
 enum WorkoutSource: String, Codable {
     case scheduled
     case manual
+    /// Recorded by another app or a watch and pulled in from Apple Health.
+    case health
 }
 
 enum MusicScope: String, Codable {

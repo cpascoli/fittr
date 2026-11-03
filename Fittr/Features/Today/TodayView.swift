@@ -10,6 +10,7 @@ struct TodayView: View {
     @Query(sort: \BodyWeightEntry.recordedAt, order: .reverse) private var weights: [BodyWeightEntry]
     @Query(sort: \PersonalRecord.achievedAt, order: .reverse) private var records: [PersonalRecord]
     @Query private var plannedLoads: [PlannedExerciseLoad]
+    @Query(sort: \DailyActivity.day, order: .reverse) private var activity: [DailyActivity]
 
     @Binding var presentedSession: WorkoutSession?
     @State private var sessionPendingDiscard: WorkoutSession?
@@ -221,8 +222,23 @@ struct TodayView: View {
                     label: "Cardio"
                 )
             }
+            if let today = todayActivity {
+                Divider().overlay(FittrTheme.hairline)
+                HStack(spacing: 12) {
+                    StatBlock(value: today.steps.formatted(), label: "Steps today")
+                    StatBlock(value: String(format: "%.1f km", today.distanceKm), label: "Walked")
+                    StatBlock(value: "\(Int(today.exerciseMinutes.rounded()))m", label: "Active")
+                }
+            }
         }
         .fittrCard()
+    }
+
+    /// Today's movement as Health counted it, when the import is on and has
+    /// run. A day with nothing in it is simply not there yet.
+    private var todayActivity: DailyActivity? {
+        let today = DateHelpers.startOfDay(.now)
+        return activity.first { DateHelpers.startOfDay($0.day) == today }
     }
 
     private var progressCard: some View {

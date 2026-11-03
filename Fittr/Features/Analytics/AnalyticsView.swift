@@ -8,6 +8,7 @@ struct AnalyticsView: View {
     @Query(sort: \ScheduledWorkout.scheduledStart) private var scheduled: [ScheduledWorkout]
     @Query(sort: \PersonalRecord.achievedAt, order: .reverse) private var records: [PersonalRecord]
     @Query(sort: \UserProfile.createdAt) private var profiles: [UserProfile]
+    @Query(sort: \DailyActivity.day) private var activity: [DailyActivity]
     @State private var range: AnalyticsRange = .fourWeeks
     @State private var weightRange: BodyWeightChartRange = .threeMonths
     @State private var selectedExerciseId: UUID?
@@ -23,9 +24,10 @@ struct AnalyticsView: View {
                     }
                     .pickerStyle(.segmented)
 
+                    bodySection
                     strengthSection
                     cardioSection
-                    bodySection
+                    activitySection
                     adherenceSection
                     recordsSection
                 }
@@ -99,6 +101,45 @@ struct AnalyticsView: View {
         }
     }
 
+    /// Steps and distance Health counted, by week. Walks that were never logged
+    /// as a workout show up here, which is the point of importing them.
+    private var activitySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionLabel(text: "Daily activity")
+            let days = activity.filter { day in
+                guard let start = range.startDate else { return true }
+                return day.day >= start
+            }
+            if days.isEmpty {
+                EmptyHint(text: "No step data yet. Turn on the Health import in Settings.", systemImage: "figure.walk")
+                    .fittrCard(.subtle)
+            } else {
+                let byWeek = Dictionary(grouping: days) { DateHelpers.isoWeekStart(for: $0.day) }
+                let weeks = byWeek.keys.sorted()
+                chart(
+                    "Steps / week",
+                    points: weeks.map { week in
+                        ChartPoint(date: week, value: Double((byWeek[week] ?? []).reduce(0) { $0 + $1.steps }))
+                    },
+                    format: { Int($0.rounded()).formatted() },
+                    style: .bar
+                )
+                chart(
+                    "Walking distance / week",
+                    points: weeks.map { week in
+                        ChartPoint(date: week, value: (byWeek[week] ?? []).reduce(0) { $0 + $1.distanceKm })
+                    },
+                    format: { String(format: "%.1f km", $0) },
+                    style: .bar
+                )
+                let average = Double(days.reduce(0) { $0 + $1.steps }) / Double(days.count)
+                Text("Average \(Int(average.rounded()).formatted()) steps a day over \(days.count) days.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
     private var bodySection: some View {
         VStack(alignment: .leading, spacing: 12) {
             SectionLabel(text: "Body")
@@ -112,7 +153,18 @@ struct AnalyticsView: View {
             if series.isEmpty {
                 EmptyHint(text: "No body-weight entries yet", systemImage: "scalemass")
             } else {
+                let axisDomain = weightAxisDomain(for: series)
                 Chart {
+                    if let target = profiles.first?.targetWeightKg {
+                        RuleMark(y: .value("Target", target))
+                            .foregroundStyle(FittrTheme.success.opacity(0.8))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                            .annotation(position: .top, alignment: .trailing) {
+                                Text("Target \(NumberFormatting.weight(target, units: .metric))")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(FittrTheme.success)
+                            }
+                    }
                     ForEach(series, id: \.id) { entry in
                         PointMark(
                             x: .value("Date", entry.recordedAt),
@@ -122,9 +174,13 @@ struct AnalyticsView: View {
                         .symbolSize(40)
                     }
                     ForEach(WorkoutMath.movingAverage(values: series.map { DatedValue(date: $0.recordedAt, value: $0.weightKg) }), id: \.date) { point in
+                        // Filled down to the bottom of the axis, not to zero. The
+                        // axis starts near the target, so a fill to zero ran out of
+                        // the chart and over the cards beneath it.
                         AreaMark(
                             x: .value("Date", point.date),
-                            y: .value("Average", point.value)
+                            yStart: .value("Floor", axisDomain.lowerBound),
+                            yEnd: .value("Average", point.value)
                         )
                         .foregroundStyle(
                             LinearGradient(
@@ -150,9 +206,14 @@ struct AnalyticsView: View {
                     }
                 }
                 .chartYAxis {
-                    AxisMarks(position: .leading, values: .automatic(desiredCount: 3))
+                    AxisMarks(position: .leading, values: .automatic(desiredCount: 4))
                 }
-                .frame(height: 180)
+                // Anchored just under the goal and just over the heaviest entry,
+                // not at zero. From zero, a 3 kg drop out of 97 is a flat line.
+                .chartYScale(domain: axisDomain)
+                // Belt and braces: nothing drawn in the plot can leave it.
+                .chartPlotStyle { $0.clipped() }
+                .frame(height: 200)
                 if let profile = profiles.first, let latest = series.last {
                     Text("Change from start: \(NumberFormatting.signedWeight(latest.weightKg - profile.startingWeightKg, units: .metric))")
                     Text("Target \(NumberFormatting.weight(profile.targetWeightKg, units: .metric)) is a personal target, not a predicted date.")
@@ -245,6 +306,20 @@ struct AnalyticsView: View {
         let start = DateHelpers.isoWeekStart(for: .now)
         let end = Calendar.current.date(byAdding: .day, value: 7, to: start) ?? .now
         return AnalyticsEngine.weeklyVolume(sessions: sessions, in: DateInterval(start: start, end: end))
+    }
+
+    /// Runs from the nearest 5 kg below the goal (or below the lightest entry,
+    /// if that is lower) to the nearest 5 kg above the heaviest, so the whole
+    /// journey from start to target is on screen and a kilo is visibly a kilo.
+    func weightAxisDomain(for series: [BodyWeightEntry]) -> ClosedRange<Double> {
+        let weights = series.map(\.weightKg)
+        let target = profiles.first?.targetWeightKg ?? weights.min() ?? 0
+        let start = profiles.first?.startingWeightKg ?? weights.max() ?? 0
+        let lowest = min(target, weights.min() ?? target)
+        let highest = max(start, weights.max() ?? start)
+        let lower = (floor((lowest - 1) / 5) * 5)
+        let upper = (ceil((highest + 1) / 5) * 5)
+        return lower...max(upper, lower + 5)
     }
 
     private var filteredWeights: [BodyWeightEntry] {
@@ -390,6 +465,7 @@ private struct TrendChart: View {
             .chartXAxis { axis }
             .chartYAxis { yAxis }
             .chartLegend(.hidden)
+            .chartPlotStyle { $0.clipped() }
         case .bar:
             Chart(points) { point in
                 BarMark(

@@ -66,6 +66,10 @@ final class AppSettings {
     var calendarSyncEnabled: Bool
     var calendarTwoWaySyncEnabled: Bool
     var healthWriteEnabled: Bool
+    /// Pull walks, runs and daily steps in from Apple Health. Defaults carry the
+    /// store across the migration; see `FittrSchema` on keeping changes additive.
+    var healthImportEnabled: Bool = false
+    var healthLastSyncAt: Date?
     var preferredWorkoutHour: Int?
     var preferredWorkoutMinute: Int?
     var defaultPoolLengthMeters: Double
@@ -92,6 +96,7 @@ final class AppSettings {
         calendarSyncEnabled: Bool = false,
         calendarTwoWaySyncEnabled: Bool = false,
         healthWriteEnabled: Bool = false,
+        healthImportEnabled: Bool = false,
         preferredWorkoutHour: Int? = nil,
         preferredWorkoutMinute: Int? = nil,
         defaultPoolLengthMeters: Double = 25,
@@ -112,6 +117,7 @@ final class AppSettings {
         self.calendarSyncEnabled = calendarSyncEnabled
         self.calendarTwoWaySyncEnabled = calendarTwoWaySyncEnabled
         self.healthWriteEnabled = healthWriteEnabled
+        self.healthImportEnabled = healthImportEnabled
         self.preferredWorkoutHour = preferredWorkoutHour
         self.preferredWorkoutMinute = preferredWorkoutMinute
         self.defaultPoolLengthMeters = defaultPoolLengthMeters
