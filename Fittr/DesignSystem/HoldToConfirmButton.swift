@@ -1,14 +1,16 @@
 import SwiftUI
 import UIKit
 
-/// A button that fires only after being held for a few seconds, with a fill that
-/// sweeps across it to show how far along the hold is. For actions that are easy
-/// to hit while picking the phone up and hard to undo once hit: moving on to the
-/// next exercise, skipping one, finishing the workout. A plain tap does nothing
-/// except start the sweep and reset, which is how the control teaches itself.
+/// A button that fires only after being held for a few seconds. It looks exactly
+/// like the plain gym button it replaces; the only difference is that a tap does
+/// nothing, and holding sweeps a lighter band across it until it fires. For
+/// actions that are easy to hit while picking the phone up and hard to undo once
+/// hit: moving on to the next exercise, skipping one, finishing the workout.
+///
+/// The sweep is drawn with a scale transform, not a `GeometryReader`: a reader
+/// inside the button made it greedy, and it grew to fill the whole bottom bar.
 struct HoldToConfirmButton: View {
     let title: String
-    var subtitle: String?
     var fill: Color = FittrTheme.accent
     var foreground: Color = .black
     var compact = false
@@ -19,70 +21,54 @@ struct HoldToConfirmButton: View {
     @State private var isHolding = false
     @State private var holdTask: Task<Void, Never>?
 
-    private var cornerRadius: CGFloat { compact ? 16 : 18 }
-    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: cornerRadius, style: .continuous) }
+    private var shape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: compact ? 16 : 18, style: .continuous)
+    }
 
     var body: some View {
-        ZStack {
-            shape.fill(FittrTheme.cardElevated)
-            label(color: .primary)
-            // The filled part of the bar carries its own copy of the label in the
-            // button's foreground colour, so the text stays legible both over the
-            // dark base and over the bright sweep as it passes underneath.
-            GeometryReader { proxy in
-                ZStack {
-                    shape.fill(fill)
-                    label(color: foreground)
-                        .frame(width: proxy.size.width, height: proxy.size.height)
-                }
-                .mask(alignment: .leading) {
-                    Rectangle().frame(width: proxy.size.width * progress)
-                }
+        Text(title)
+            .font(compact ? .headline.weight(.semibold) : .title3.weight(.bold))
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .foregroundStyle(compact ? Color.primary : foreground)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: compact ? 52 : FittrTheme.gymButtonHeight)
+            .background(baseFill.opacity(isHolding ? 0.85 : 1), in: shape)
+            .overlay(alignment: .leading) {
+                Rectangle()
+                    .fill(sweepFill)
+                    .scaleEffect(x: progress, y: 1, anchor: .leading)
+                    .allowsHitTesting(false)
             }
-        }
-        .frame(maxWidth: .infinity)
-        .frame(minHeight: compact ? 52 : FittrTheme.gymButtonHeight)
-        .clipShape(shape)
-        .overlay(shape.strokeBorder(fill.opacity(0.5), lineWidth: 1))
-        .scaleEffect(isHolding ? 0.98 : 1)
-        .animation(.easeOut(duration: 0.15), value: isHolding)
-        .contentShape(shape)
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in
-                    if !isHolding { beginHold() }
-                }
-                .onEnded { _ in cancelHold() }
-        )
-        .onDisappear { holdTask?.cancel() }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
-        .accessibilityHint("Hold for \(Int(duration.rounded())) seconds")
-        .accessibilityAddTraits(.isButton)
-        // VoiceOver users confirm through the rotor action rather than a timed
-        // hold, which the gesture cannot deliver to them.
-        .accessibilityAction { fire() }
+            .clipShape(shape)
+            .scaleEffect(isHolding ? 0.98 : 1)
+            .animation(.easeOut(duration: 0.15), value: isHolding)
+            .contentShape(shape)
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in
+                        if !isHolding { beginHold() }
+                    }
+                    .onEnded { _ in cancelHold() }
+            )
+            .onDisappear { holdTask?.cancel() }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(title)
+            .accessibilityHint("Hold for \(Int(duration.rounded())) seconds")
+            .accessibilityAddTraits(.isButton)
+            // VoiceOver users confirm through the rotor action rather than a timed
+            // hold, which the gesture cannot deliver to them.
+            .accessibilityAction { fire() }
     }
 
-    private func label(color: Color) -> some View {
-        VStack(spacing: 2) {
-            Text(title)
-                .font(compact ? .headline.weight(.semibold) : .title3.weight(.bold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-            Text(hint)
-                .font(.caption2.weight(.semibold))
-                .opacity(0.8)
-        }
-        .foregroundStyle(color)
-        .padding(.horizontal, 12)
-        .frame(maxWidth: .infinity)
+    private var baseFill: Color {
+        compact ? FittrTheme.cardElevated : fill
     }
 
-    private var hint: String {
-        if isHolding { return "Keep holding…" }
-        if let subtitle { return subtitle }
-        return "Hold for \(Int(duration.rounded())) seconds"
+    /// Lightens the hero button as the hold progresses; tints the secondary one
+    /// with its accent. Either way the label stays readable over both halves.
+    private var sweepFill: Color {
+        compact ? fill.opacity(0.45) : Color.white.opacity(0.35)
     }
 
     private func beginHold() {
@@ -148,7 +134,7 @@ struct HoldToConfirmSheet: View {
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(FittrTheme.background.ignoresSafeArea())
-        .presentationDetents([.height(300)])
+        .presentationDetents([.height(280)])
         .presentationDragIndicator(.visible)
         .preferredColorScheme(.dark)
     }
