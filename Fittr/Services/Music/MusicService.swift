@@ -1,5 +1,6 @@
 import Foundation
 import MediaPlayer
+import Observation
 
 struct MusicTrackInfo: Equatable, Sendable, Identifiable {
     var id: String
@@ -42,18 +43,46 @@ protocol MusicServicing: AnyObject {
     func previous()
 }
 
+/// Observable so a screen showing `nowPlaying` redraws when the song changes
+/// underneath it. It used to be a plain class, and the workout's music row only
+/// caught up when something else on the screen happened to redraw.
+@Observable
 @MainActor
 final class MusicService: MusicServicing {
     private(set) var isAuthorized = false
     private(set) var nowPlaying: MusicTrackInfo?
-    private var pausedAt: TimeInterval?
-    private var holdQueue = false
+    @ObservationIgnored private var pausedAt: TimeInterval?
+    @ObservationIgnored private var holdQueue = false
     /// What Fittr last put in the queue, in order, so a repeat request can tell
     /// "already playing this" from "needs a new queue".
-    private var queuedItemIDs: [UInt64] = []
+    @ObservationIgnored private var queuedItemIDs: [UInt64] = []
+    @ObservationIgnored private var nowPlayingObserver: NSObjectProtocol?
+
+    init() {
+        // `nowPlaying` was only written inside `play`, so a playlist moving to its
+        // next song, a skip, or a change made from Control Center all left it naming
+        // the previous track. The player reports every change; listen for it.
+        let player = MPMusicPlayerController.systemMusicPlayer
+        player.beginGeneratingPlaybackNotifications()
+        nowPlayingObserver = NotificationCenter.default.addObserver(
+            forName: .MPMusicPlayerControllerNowPlayingItemDidChange,
+            object: player,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.refreshNowPlaying() }
+        }
+    }
 
     var isPlaying: Bool {
         MPMusicPlayerController.systemMusicPlayer.playbackState == .playing
+    }
+
+    private func refreshNowPlaying() {
+        guard let item = MPMusicPlayerController.systemMusicPlayer.nowPlayingItem else {
+            nowPlaying = nil
+            return
+        }
+        nowPlaying = Self.track(from: item)
     }
 
     func requestAuthorization() async -> Bool {
@@ -269,6 +298,7 @@ final class MusicService: MusicServicing {
     }
 }
 
+@Observable
 @MainActor
 final class MockMusicService: MusicServicing {
     var isAuthorized = false
@@ -333,6 +363,14 @@ final class MockMusicService: MusicServicing {
         nowPlaying = nil
     }
 
-    func next() {}
-    func previous() {}
+    /// Moves through the queue the way the real player does, so what the mock
+    /// says is playing drifts from what was last requested, as it does on a phone.
+    func next() { step(by: 1) }
+    func previous() { step(by: -1) }
+
+    private func step(by offset: Int) {
+        guard let current = nowPlaying, let index = queuedIDs.firstIndex(of: current.id) else { return }
+        let nextIndex = (index + offset + queuedIDs.count) % queuedIDs.count
+        nowPlaying = catalog.first { $0.id == queuedIDs[nextIndex] }
+    }
 }

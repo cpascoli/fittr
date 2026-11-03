@@ -210,6 +210,14 @@ private extension MusicPickerView {
         status = results.isEmpty ? "No local matches for “\(query)”." : "\(results.count) local tracks"
     }
 
+    /// An exercise's track is looked up by exercise alone and applies in every
+    /// workout, so it must not be owned by the template it happened to be chosen
+    /// from: a template's assignments are deleted with it. Only a workout-level
+    /// track belongs to the template.
+    var owningTemplate: WorkoutTemplate? {
+        exerciseId == nil ? template : nil
+    }
+
     func assign(_ track: MusicTrackInfo) {
         insert(
             MusicAssignment(
@@ -218,7 +226,7 @@ private extension MusicPickerView {
                 cachedTitle: track.title,
                 cachedArtist: track.artist,
                 source: .localLibrary,
-                template: template,
+                template: owningTemplate,
                 exerciseId: exerciseId
             )
         )
@@ -237,13 +245,20 @@ private extension MusicPickerView {
                 source: .localLibrary,
                 playlistID: playlist.id,
                 playlistName: playlist.name,
-                template: template,
+                template: owningTemplate,
                 exerciseId: exerciseId
             )
         )
     }
 
     func insert(_ assignment: MusicAssignment) {
+        // With neither an exercise nor a template to attach to, the assignment
+        // could never be found again. Opened from the workout screen after the
+        // last exercise, say.
+        guard exerciseId != nil || template != nil else {
+            dismiss()
+            return
+        }
         for existing in assignments where shouldReplace(existing) {
             modelContext.delete(existing)
         }

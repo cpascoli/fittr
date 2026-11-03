@@ -53,6 +53,7 @@ struct ContentView: View {
             didSeed = true
             FittrDependencies.shared.attach(context: modelContext)
             try? SeedService.seedIfNeeded(in: modelContext)
+            try? MusicAssignmentRepair.detachExerciseTracksFromTemplates(in: modelContext)
             if LaunchArguments.isUITesting, let settings = try? modelContext.fetch(FetchDescriptor<AppSettings>()).first {
                 settings.hasCompletedOnboarding = true
                 try? modelContext.save()

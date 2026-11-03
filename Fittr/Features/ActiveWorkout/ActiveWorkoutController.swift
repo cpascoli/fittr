@@ -674,7 +674,11 @@ final class ActiveWorkoutController {
             isMusicPlaying = true
             return
         }
-        playAssignedMusicIfNeeded()
+        // Pressing Play is a request, so neither the global auto-play setting nor
+        // the exercise's own auto-start toggle has a say. Routing this through the
+        // guarded path left the button dead whenever auto-play was off.
+        guard session.endedAt == nil, !showingSummary else { return }
+        playAssignedMusic(forceRestart: false, automatic: false)
     }
 
     private func pauseMusicForRest() {
@@ -703,17 +707,21 @@ final class ActiveWorkoutController {
         musicStoppedByUser = false
         musicPausedForRest = false
         allowMusicDuringRest = isResting
-        playAssignedMusic(forceRestart: true)
+        playAssignedMusic(forceRestart: true, automatic: false)
     }
 
+    /// Playback the app starts on its own when an exercise begins. Bows to the
+    /// global auto-play setting and to the assignment's own auto-start toggle.
     private func playAssignedMusicIfNeeded() {
         guard session.endedAt == nil, !showingSummary else { return }
         guard autoPlayExerciseTrack, !musicStoppedByUser, currentExercise != nil else { return }
         if isRestingBeforeNextExercise && !allowMusicDuringRest { return }
-        playAssignedMusic(forceRestart: false)
+        playAssignedMusic(forceRestart: false, automatic: true)
     }
 
-    private func playAssignedMusic(forceRestart: Bool) {
+    /// `automatic` means nobody asked: the exercise simply started. An assignment
+    /// whose auto-start toggle is off stays silent then, and plays only on request.
+    private func playAssignedMusic(forceRestart: Bool, automatic: Bool) {
         guard let exercise = currentExercise else { return }
         let assignments = (try? modelContext.fetch(FetchDescriptor<MusicAssignment>())) ?? []
         let assignment: MusicAssignment
@@ -727,6 +735,7 @@ final class ActiveWorkoutController {
         } else {
             return
         }
+        if automatic && !assignment.autoplay { return }
         let playlistID = assignment.isPlaylist ? assignment.playlistID : nil
         let itemID = assignment.musicItemID
         let shuffle = assignment.shufflePlaylist

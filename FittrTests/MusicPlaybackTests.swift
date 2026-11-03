@@ -180,6 +180,43 @@ struct MusicPlaybackTests {
         try await tick()
         #expect(nextMusic.playedIDs == ["new-squat-song"])
     }
+
+    /// The Exercise Library's "Auto start when exercise begins" toggle was saved
+    /// and never read: every track auto-started regardless.
+    @Test func anExerciseSetNotToAutoStartStaysSilentUntilPlayIsPressed() async throws {
+        let context = try makeContext()
+        let music = MockMusicService()
+        music.catalog = [track("squat-song")]
+        assign(itemID: "squat-song", to: SeedID.gobletSquat, in: context, autoplay: false)
+
+        let controller = try makeController(music: music, in: context)
+        try await tick()
+        #expect(music.playedIDs.isEmpty)
+        #expect(music.isPlaying == false)
+
+        controller.playMusic()
+        try await tick()
+        #expect(music.playedIDs == ["squat-song"])
+        #expect(music.isPlaying)
+    }
+
+    /// Play went through the auto-play guard, so with auto-play off in Settings
+    /// the button did nothing at all.
+    @Test func playButtonStartsTheTrackWhenAutoPlayIsOff() async throws {
+        let context = try makeContext()
+        let music = MockMusicService()
+        music.catalog = [track("squat-song")]
+        assign(itemID: "squat-song", to: SeedID.gobletSquat, in: context)
+
+        let controller = try makeController(music: music, in: context, autoPlay: false)
+        try await tick()
+        #expect(music.playedIDs.isEmpty)
+
+        controller.playMusic()
+        try await tick()
+        #expect(music.playedIDs == ["squat-song"])
+        #expect(controller.isMusicPlaying)
+    }
 }
 
 private extension MusicPlaybackTests {
@@ -193,7 +230,7 @@ private extension MusicPlaybackTests {
     }
 
     /// Mirrors the picker: one assignment per exercise, the newest replacing the old.
-    func assign(itemID: String, to exerciseId: UUID, in context: ModelContext) {
+    func assign(itemID: String, to exerciseId: UUID, in context: ModelContext, autoplay: Bool = true) {
         let existing = (try? context.fetch(FetchDescriptor<MusicAssignment>())) ?? []
         for old in existing where old.exerciseId == exerciseId {
             context.delete(old)
@@ -204,6 +241,7 @@ private extension MusicPlaybackTests {
                 musicItemID: itemID,
                 cachedTitle: itemID,
                 cachedArtist: "Artist",
+                autoplay: autoplay,
                 exerciseId: exerciseId
             )
         )
@@ -218,7 +256,8 @@ private extension MusicPlaybackTests {
     func makeController(
         music: MockMusicService,
         in context: ModelContext,
-        targetSets: Int = 1
+        targetSets: Int = 1,
+        autoPlay: Bool = true
     ) throws -> ActiveWorkoutController {
         let first = snapshot(id: SeedID.gobletSquat, name: "Goblet Squat", order: 0, targetSets: targetSets)
         let second = snapshot(id: SeedID.romanianDeadlift, name: "Romanian Deadlift", order: 1, targetSets: targetSets)
@@ -249,7 +288,7 @@ private extension MusicPlaybackTests {
         context.insert(session)
 
         let settings = AppSettings(id: SeedID.settings)
-        settings.autoPlayExerciseTrack = true
+        settings.autoPlayExerciseTrack = autoPlay
         context.insert(settings)
         try context.save()
 
